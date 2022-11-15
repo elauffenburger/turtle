@@ -21,7 +21,6 @@ warnings=(
 
 clang *.c \
     -g \
-    -Werror \
     "${warnings[@]}" \
     -fcolor-diagnostics \
     -fansi-escape-codes \

@@ -4,12 +4,12 @@
 #include <stdio.h>
 #include <unistd.h>
 
-void onexit() {
+void onexit(int signal) {
   fputs("bye!\n", stderr);
   exit(0);
 }
 
-int main(int argc, char **argv) {
+int main() {
   char buf[BUFSIZ];
   cmd *cmd;
   cmd_parser *parser = cmd_parser_new();
@@ -24,12 +24,10 @@ int main(int argc, char **argv) {
     }
 
     if ((cmd = cmd_parser_parse(parser, buf)) == NULL) {
-      giveup(sprintf("failed to parse command: %s", parser->err));
+      giveup("parsing failed");
     }
 
     cmd_exec(cmd);
-
-    break;
   }
 
   exit(0);
