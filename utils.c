@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void giveup(char *prog, char *msg) {
+void giveup(char *msg) {
   fprintf(stderr, "%s\n", msg);
-  perror(prog);
+  perror("");
 
   exit(1);
 }

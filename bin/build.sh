@@ -1,3 +1,30 @@
 #!/usr/bin/env bash
 
-clang -fcolor-diagnostics -fansi-escape-codes -g *.c -o ./build/turtle $(pkg-config --cflags --libs glib-2.0)
+warnings=(
+    -Wextra \
+    -Wall \
+    -Wfloat-equal \
+    -Wundef \
+    -Wshadow \
+    -Wpointer-arith \
+    -Wcast-align \
+    -Wstrict-prototypes \
+    -Wstrict-overflow=5 \
+    -Wwrite-strings \
+    -Waggregate-return \
+    -Wcast-qual \
+    -Wswitch-default \
+    -Wswitch-enum \
+    -Wconversion \
+    -Wunreachable-code \
+)
+
+clang *.c \
+    -g \
+    -Werror \
+    "${warnings[@]}" \
+    -fcolor-diagnostics \
+    -fansi-escape-codes \
+    -fsanitize=address\
+    $(pkg-config --cflags --libs glib-2.0) \
+    -o ./build/turtle
