@@ -7,12 +7,6 @@ typedef struct cmd {
   GList *parts;
 } cmd;
 
-typedef struct cmd_parser {
-  char *next;
-
-  cmd *cmd;
-} cmd_parser;
-
 typedef struct cmd_word {
   // GList<cmd_word_part*>;
   GList *parts;
@@ -22,6 +16,7 @@ typedef enum cmd_word_part_type {
   CMD_WORD_PART_TYPE_UNK,
   CMD_WORD_PART_TYPE_LIT,
   CMD_WORD_PART_TYPE_STR,
+  CMD_WORD_PART_TYPE_VAR,
 } cmd_word_part_type;
 
 typedef enum cmd_word_part_str_part_type {
@@ -32,7 +27,7 @@ typedef struct cmd_word_part_str_part {
   cmd_word_part_str_part_type type;
 
   union cmd_word_part_str_part_value {
-    GString* literal;
+    GString *literal;
   } value;
 } cmd_word_part_str_part;
 
@@ -41,13 +36,20 @@ typedef struct cmd_word_part_str {
   GList *parts;
 } cmd_word_part_str;
 
+typedef struct cmd_word_part_var {
+  GString *name;
+} cmd_word_part_var;
+
+typedef union cmd_word_part_value {
+  GString *literal;
+  cmd_word_part_str *str;
+  cmd_word_part_var *var;
+} cmd_word_part_value;
+
 typedef struct cmd_word_part {
   cmd_word_part_type type;
 
-  union cmd_word_part_value {
-    GString *literal;
-    cmd_word_part_str *str;
-  } value;
+  cmd_word_part_value value;
 } cmd_word_part;
 
 typedef enum cmd_part_type { CMD_PART_TYPE_WORD } cmd_part_type;
@@ -60,8 +62,9 @@ typedef struct cmd_part {
   } value;
 } cmd_part;
 
-cmd_parser *cmd_parser_new(void);
-
-cmd *cmd_parser_parse(cmd_parser *parser, char *input);
-
 void cmd_exec(cmd *cmd);
+
+cmd_word_part *cmd_word_part_new(cmd_word_part_type type,
+                                 cmd_word_part_value val);
+
+cmd *cmd_new(void);

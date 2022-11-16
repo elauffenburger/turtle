@@ -1,4 +1,5 @@
 #include "cmd.h"
+#include "cmd_parser.h";
 #include "glib.h"
 #include "utils.h"
 #include <locale.h>
