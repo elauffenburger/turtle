@@ -12,6 +12,46 @@ static bool is_alpha(char c) {
 
 static bool is_numeric(char c) { return c >= 48 && c <= 57; }
 
+void cmd_parser_err(cmd_parser *parser, char *format, ...) {
+  va_list args;
+  va_start(args, format);
+
+  char full_format[BUFSIZ];
+  sprintf(full_format, "parser error: %s\n", format);
+
+  vfprintf(stderr, full_format, args);
+  va_end(args);
+
+  exit(1);
+}
+
+GString *cmd_parser_parse_word_literal(cmd_parser *parser) {
+  GString *literal = NULL;
+
+  while (*parser->next != '\0') {
+    char c = *parser->next;
+
+    if (is_alpha(c) || is_numeric(c)) {
+      if (literal == NULL) {
+        literal = g_string_new(NULL);
+      }
+
+      literal = g_string_append_c(literal, c);
+    } else if (c == ' ' || c == '\n') {
+      parser->next++;
+
+      return literal;
+    } else {
+      cmd_parser_err(parser, "unexpected character %c", c);
+      return NULL;
+    }
+
+    parser->next++;
+  }
+
+  return literal;
+}
+
 cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
   cmd_word *word = malloc(sizeof(cmd_word));
   word->parts = g_list_alloc();
@@ -23,43 +63,17 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
     char c = *parser->next;
 
     if (is_alpha(c) || is_numeric(c)) {
-      switch (type) {
-      case CMD_WORD_PART_TYPE_UNK: {
-        type = CMD_WORD_PART_TYPE_LIT;
-        literal = g_string_new(NULL);
-        literal = g_string_append_c(literal, c);
-        break;
-      }
+      GString *literal = cmd_parser_parse_word_literal(parser);
 
-      case CMD_WORD_PART_TYPE_LIT: {
-        literal = g_string_append_c(literal, c);
-        break;
-      }
-      }
+      cmd_word_part *part = malloc(sizeof(cmd_word_part));
+      part->type = CMD_WORD_PART_TYPE_LIT;
+      part->value.literal = literal;
 
-    } else if (c == ' ' || c == '\n') {
-      switch (type) {
-      case CMD_WORD_PART_TYPE_UNK: {
-        giveup("unreachable");
-        break;
-      }
+      word->parts = g_list_append(word->parts, part);
 
-      case CMD_WORD_PART_TYPE_LIT: {
-        parser->next++;
-
-        cmd_word_part *part = malloc(sizeof(cmd_word_part));
-        part->type = CMD_WORD_PART_TYPE_LIT;
-        part->value.literal = literal;
-
-        word->parts = g_list_append(word->parts, part);
-
-        return word;
-      }
-      }
+      return word;
     } else {
-      fprintf(stderr, "unexpected character %c", c);
-      giveup("");
-      return NULL;
+      cmd_parser_err(parser, "unexpected character %c", c);
     }
 
     parser->next++;
@@ -107,9 +121,8 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
 
       continue;
     }
-    fprintf(stderr, "unexpected char %c", c);
-    giveup("");
-    return NULL;
+
+    cmd_parser_err(parser, "unexpected char %c", c);
   }
 
   return parser->cmd;

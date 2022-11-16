@@ -17,6 +17,7 @@ warnings=(
     -Wswitch-enum \
     -Wconversion \
     -Wunreachable-code \
+    -Wno-incompatible-pointer-types-discards-qualifiers \
 )
 
 clang *.c \
