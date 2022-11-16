@@ -1,8 +1,10 @@
 #include "cmd.h"
 #include "glib.h"
 #include "utils.h"
+#include <locale.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <wchar.h>
 
 void onexit(int signal) {
   fputs("bye!\n", stderr);
@@ -19,6 +21,9 @@ int main() {
   }
 
   for (;;) {
+    printf("🐢> ");
+    fflush(stdout);
+
     if (fgets(buf, sizeof(buf), stdin) == NULL) {
       giveup("failed to read from stdin");
     }
