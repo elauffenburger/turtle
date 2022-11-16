@@ -1,4 +1,4 @@
-#include "cmd_parser.h";
+#include "cmd_parser.h"
 #include "cmd.h"
 #include "glib.h"
 #include "utils.h"
@@ -6,8 +6,11 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#define UNQUOTED_STR '\''
+#define STR_UNQUOTED '\''
+#define STR_QUOTED '"'
 #define VAR_START '$'
+
+cmd_word_part_var *cmd_parser_parse_var(cmd_parser *parser);
 
 static bool is_alpha(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -61,40 +64,80 @@ GString *cmd_parser_parse_word_literal(cmd_parser *parser) {
   return literal;
 }
 
-cmd_word_part_str *cmd_parser_parse_str_literal(cmd_parser *parser) {
-  GString *str = g_string_new(NULL);
+cmd_word_part_str_part *cmd_parser_parse_str_literal(cmd_parser *parser,
+                                                     char str_char) {
+  cmd_word_part_str_part *part = malloc(sizeof(cmd_word_part_str_part));
+  part->type = CMD_WORD_PART_STR_PART_TYPE_LITERAL;
+  part->value.literal = g_string_new(NULL);
 
   while (*parser->next != '\0') {
     char c = *parser->next;
 
     if (is_reg_char(c) || c == ' ') {
-      str = g_string_append_c(str, c);
-    } else if (c == UNQUOTED_STR) {
-      parser->next++;
-
-      cmd_word_part_str_part *part = malloc(sizeof(cmd_word_part_str_part));
-      part->type = CMD_WORD_PART_STR_PART_TYPE_LITERAL;
-      part->value.literal = str;
-
-      cmd_word_part_str *res = malloc(sizeof(cmd_word_part_str));
-      res->quoted = false;
-      res->parts = g_list_alloc();
-      res->parts = g_list_append(res->parts, part);
-
-      return res;
+      part->value.literal = g_string_append_c(part->value.literal, c);
     } else {
-      cmd_parser_err(parser, "unexpected char: %c", c);
+      return part;
     }
 
     parser->next++;
   }
 }
 
+cmd_word_part_str *cmd_parser_parse_str_unquoted(cmd_parser *parser) {
+  parser->next++;
+
+  cmd_word_part_str *res = malloc(sizeof(cmd_word_part_str));
+  res->quoted = false;
+  res->parts = g_list_alloc();
+  res->parts = g_list_append(
+      res->parts, cmd_parser_parse_str_literal(parser, STR_UNQUOTED));
+
+  parser->next++;
+
+  return res;
+}
+
+cmd_word_part_str *cmd_parser_parse_str_quoted(cmd_parser *parser) {
+  parser->next++;
+
+  cmd_word_part_str *res = malloc(sizeof(cmd_word_part_str));
+  res->quoted = true;
+  res->parts = g_list_alloc();
+
+  while (*parser->next != '\0') {
+    char c = *parser->next;
+
+    if (is_reg_char(c) || c == ' ') {
+      cmd_word_part_str_part *part =
+          cmd_parser_parse_str_literal(parser, STR_QUOTED);
+
+      res->parts = g_list_append(res->parts, part);
+    } else if (c == VAR_START) {
+      cmd_word_part_var *var = cmd_parser_parse_var(parser);
+
+      cmd_word_part_str_part *part = malloc(sizeof(cmd_word_part_str_part));
+      part->type = CMD_WORD_PART_STR_PART_TYPE_VAR;
+      part->value.var = var;
+
+      res->parts = g_list_append(res->parts, part);
+    } else if (c == STR_QUOTED) {
+      parser->next++;
+
+      return res;
+    } else {
+      cmd_parser_err(parser, "unexpected char: %c", c);
+    }
+  }
+}
+
 cmd_word_part_str *cmd_parser_parse_str(cmd_parser *parser) {
   switch (*parser->next) {
-  case UNQUOTED_STR: {
-    parser->next++;
-    return cmd_parser_parse_str_literal(parser);
+  case STR_UNQUOTED: {
+    return cmd_parser_parse_str_unquoted(parser);
+  }
+
+  case STR_QUOTED: {
+    return cmd_parser_parse_str_quoted(parser);
   }
 
   default: {
@@ -140,7 +183,7 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
       cmd_word_part *part = cmd_word_part_new(CMD_WORD_PART_TYPE_LIT, val);
 
       word->parts = g_list_append(word->parts, part);
-    } else if (c == UNQUOTED_STR) {
+    } else if (c == STR_UNQUOTED || c == STR_QUOTED) {
       cmd_word_part_value val = {
           .str = cmd_parser_parse_str(parser),
       };
@@ -185,7 +228,8 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
       return parser->cmd;
     }
 
-    if (is_reg_char(c) || c == UNQUOTED_STR || c == VAR_START) {
+    if (is_reg_char(c) || c == STR_UNQUOTED || c == STR_QUOTED ||
+        c == VAR_START) {
       cmd_word *word;
       if ((word = cmd_parser_parse_word(parser)) == NULL) {
         return NULL;
