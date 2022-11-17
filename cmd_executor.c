@@ -69,6 +69,10 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
             res = g_string_append(res, str_part->value.literal->str);
             break;
           }
+
+          case CMD_WORD_PART_STR_PART_TYPE_VAR:
+            giveup("cmd_executor_word_to_str: unexpected var");
+
           default:
             giveup("str part type not implemented");
           }
@@ -95,6 +99,8 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
   return res->str;
 }
 
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#pragma clang diagnostic push
 int cmd_executor_exec(cmd_executor *executor, char *file, char **argv) {
   pid_t pid;
   if ((pid = fork()) == 0) {
@@ -110,3 +116,4 @@ int cmd_executor_exec(cmd_executor *executor, char *file, char **argv) {
 
   return status;
 }
+#pragma clang diagnostic pop

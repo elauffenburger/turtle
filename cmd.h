@@ -13,7 +13,6 @@ typedef struct cmd_word {
 } cmd_word;
 
 typedef enum cmd_word_part_type {
-  CMD_WORD_PART_TYPE_UNK,
   CMD_WORD_PART_TYPE_LIT,
   CMD_WORD_PART_TYPE_STR,
   CMD_WORD_PART_TYPE_VAR,

@@ -1,5 +1,5 @@
 #include "cmd.h"
-#include "cmd_parser.h";
+#include "cmd_parser.h"
 #include "glib.h"
 #include "utils.h"
 #include <locale.h>
@@ -7,20 +7,47 @@
 #include <unistd.h>
 #include <wchar.h>
 
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#pragma clang diagnostic push
 void onexit(int signal) {
   fputs("bye!\n", stderr);
   exit(0);
 }
+#pragma clang diagnostic pop
 
-int main() {
-  char buf[BUFSIZ];
-  cmd *cmd;
+int main(int argc, char **argv) {
   cmd_parser *parser = cmd_parser_new();
 
+  // Set up signal handlers.
   if (signal(SIGINT, SIG_IGN) != SIG_IGN) {
     signal(SIGINT, onexit);
   }
 
+  // Parse args.
+  char *cmd_str = NULL;
+
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "-c") == 0) {
+      i++;
+      cmd_str = argv[i];
+    } else {
+      giveup("unknown arg %s", argv[i]);
+    }
+  }
+
+  // If the user specified a single command, run it!
+  if (cmd_str != NULL) {
+    cmd *cmd;
+    if ((cmd = cmd_parser_parse(parser, cmd_str)) == NULL) {
+      giveup("parsing failed");
+    }
+
+    cmd_exec(cmd);
+    exit(0);
+  }
+
+  // Otherwise, we're in interactive mode.
+  char buf[BUFSIZ];
   for (;;) {
     printf("🐢> ");
     fflush(stdout);
@@ -29,12 +56,11 @@ int main() {
       giveup("failed to read from stdin");
     }
 
+    cmd *cmd;
     if ((cmd = cmd_parser_parse(parser, buf)) == NULL) {
       giveup("parsing failed");
     }
 
     cmd_exec(cmd);
   }
-
-  exit(0);
 }

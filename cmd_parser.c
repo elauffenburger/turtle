@@ -10,8 +10,6 @@
 #define STR_QUOTED '"'
 #define VAR_START '$'
 
-cmd_word_part_var *cmd_parser_parse_var(cmd_parser *parser);
-
 static bool is_alpha(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
@@ -27,19 +25,51 @@ static bool is_var_name_char(char c) {
   return is_alpha(c) || is_numeric(c) || c == '_';
 }
 
-static void cmd_parser_err(cmd_parser *parser, char *format, ...) {
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#pragma clang diagnostic push
+static void cmd_parser_err(cmd_parser *parser, char *fmt, ...) {
   va_list args;
-  va_start(args, format);
+  va_start(args, fmt);
 
   char full_format[BUFSIZ];
-  snprintf(full_format, BUFSIZ, "parser error: %s\n", format);
+  snprintf(full_format, BUFSIZ, "parser error: %s\n", fmt);
 
   vfprintf(stderr, full_format, args);
   va_end(args);
 
   exit(1);
 }
+#pragma clang diagnostic pop
 
+// cmd_parser_parse_var parses a variable.
+//
+// The cursor will be placed after the var name.
+// (e.g. "$var" will be returned and the cursor will be at "/" in "$var/baz").
+cmd_word_part_var *cmd_parser_parse_var(cmd_parser *parser) {
+  parser->next++;
+
+  cmd_word_part_var *var = malloc(sizeof(cmd_word_part_var));
+  var->name = g_string_new(NULL);
+
+  while (*parser->next != 0) {
+    char c = *parser->next;
+
+    if (is_var_name_char(c)) {
+      var->name = g_string_append_c(var->name, c);
+    } else {
+      break;
+    }
+
+    parser->next++;
+  }
+
+  return var;
+}
+
+// cmd_parser_parse_word_literal parses a word literal.
+//
+// The cursor will be placed after at the last character of the literal
+// (e.g. "foo" will be returned and cursor will be at ' ' in "foo bar").
 GString *cmd_parser_parse_word_literal(cmd_parser *parser) {
   GString *literal = NULL;
 
@@ -65,6 +95,10 @@ GString *cmd_parser_parse_word_literal(cmd_parser *parser) {
   return literal;
 }
 
+// cmd_parser_parse_str_literal parses a string literal.
+//
+// The cursor will be placed at the end of the literal
+// (e.g. "foo" will be returned and the cursor will be at '$' in "foo$bar").
 cmd_word_part_str_part *cmd_parser_parse_str_literal(cmd_parser *parser,
                                                      bool (*predicate)(char)) {
   cmd_word_part_str_part *part = malloc(sizeof(cmd_word_part_str_part));
@@ -77,15 +111,21 @@ cmd_word_part_str_part *cmd_parser_parse_str_literal(cmd_parser *parser,
     if (predicate(c)) {
       part->value.literal = g_string_append_c(part->value.literal, c);
     } else {
-      return part;
+      break;
     }
 
     parser->next++;
   }
+
+  return part;
 }
 
 static bool is_str_unquoted_lit_char(char c) { return c != STR_UNQUOTED; }
 
+// cmd_parser_parse_str_unquoted parses an unquoted string.
+//
+// The cursor will be placed after the string
+// (e.g. "'foo'" will be returned and the cursor will be at ' ' in "'foo' bar").
 cmd_word_part_str *cmd_parser_parse_str_unquoted(cmd_parser *parser) {
   parser->next++;
 
@@ -104,6 +144,11 @@ static bool is_str_quoted_lit_char(char c) {
   return is_literal_char(c) || c == ' ';
 }
 
+// cmd_parser_parse_str_quoted parses a quoted string.
+//
+// The cursor will be placed after the string.
+// (e.g. '"foo$bar"' will be returned and the cursor will be at ' ' in
+// '"foo$bar" baz').
 cmd_word_part_str *cmd_parser_parse_str_quoted(cmd_parser *parser) {
   parser->next++;
 
@@ -130,13 +175,19 @@ cmd_word_part_str *cmd_parser_parse_str_quoted(cmd_parser *parser) {
     } else if (c == STR_QUOTED) {
       parser->next++;
 
-      return res;
+      break;
     } else {
       cmd_parser_err(parser, "str_quoted: unexpected char: %c", c);
     }
   }
+
+  return res;
 }
 
+// cmd_parser_parse_str parses a string.
+//
+// The cursor will be placed after the string.
+// (e.g. "'foo'" will be returned and the cursor will be at ' ' in "'foo' bar").
 cmd_word_part_str *cmd_parser_parse_str(cmd_parser *parser) {
   switch (*parser->next) {
   case STR_UNQUOTED: {
@@ -152,27 +203,14 @@ cmd_word_part_str *cmd_parser_parse_str(cmd_parser *parser) {
                    *parser->next);
   }
   }
+
+  return NULL;
 }
 
-cmd_word_part_var *cmd_parser_parse_var(cmd_parser *parser) {
-  parser->next++;
-
-  cmd_word_part_var *var = malloc(sizeof(cmd_word_part_var));
-  var->name = g_string_new(NULL);
-
-  while (*parser->next != 0) {
-    char c = *parser->next;
-
-    if (is_var_name_char(c)) {
-      var->name = g_string_append_c(var->name, c);
-    } else {
-      return var;
-    }
-
-    parser->next++;
-  }
-}
-
+// cmd_parser_parse_word parses a word.
+//
+// The cursor will be placed after the word.
+// (e.g. "foo" will be returned and the cursor will be at ' ' in "foo bar").
 cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
   cmd_word *word = malloc(sizeof(cmd_word));
   word->parts = g_list_alloc();
@@ -219,6 +257,7 @@ cmd_parser *cmd_parser_new() {
   return parser;
 }
 
+// cmd_parser_parse parses the provided input and returns an executable cmd*.
 cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
   parser->cmd = cmd_new();
 

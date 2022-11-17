@@ -1,3 +1,3 @@
 #pragma once
 
-void giveup(char *msg);
+void giveup(char *fmt, ...);
