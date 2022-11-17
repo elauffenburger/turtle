@@ -18,11 +18,12 @@ static bool is_alpha(char c) {
 
 static bool is_numeric(char c) { return c >= 48 && c <= 57; }
 
-static bool is_reg_char(char c) {
-  return is_alpha(c) || is_numeric(c) || c == '-' || c == '_';
+static bool is_literal_char(char c) {
+  return !(c == ' ' || c == '\n' || c == '$' || c == '`' || c == '<' ||
+           c == '>' || c == '&' || c == STR_QUOTED || c == STR_UNQUOTED);
 }
 
-static bool is_var_char(char c) {
+static bool is_var_name_char(char c) {
   return is_alpha(c) || is_numeric(c) || c == '_';
 }
 
@@ -31,7 +32,7 @@ static void cmd_parser_err(cmd_parser *parser, char *format, ...) {
   va_start(args, format);
 
   char full_format[BUFSIZ];
-  sprintf(full_format, "parser error: %s\n", format);
+  snprintf(full_format, BUFSIZ, "parser error: %s\n", format);
 
   vfprintf(stderr, full_format, args);
   va_end(args);
@@ -45,7 +46,7 @@ GString *cmd_parser_parse_word_literal(cmd_parser *parser) {
   while (*parser->next != '\0') {
     char c = *parser->next;
 
-    if (is_reg_char(c)) {
+    if (is_literal_char(c)) {
       if (literal == NULL) {
         literal = g_string_new(NULL);
       }
@@ -54,7 +55,7 @@ GString *cmd_parser_parse_word_literal(cmd_parser *parser) {
     } else if (c == ' ' || c == '\n') {
       return literal;
     } else {
-      cmd_parser_err(parser, "unexpected character %c", c);
+      cmd_parser_err(parser, "word_literal: unexpected character %c", c);
       return NULL;
     }
 
@@ -65,7 +66,7 @@ GString *cmd_parser_parse_word_literal(cmd_parser *parser) {
 }
 
 cmd_word_part_str_part *cmd_parser_parse_str_literal(cmd_parser *parser,
-                                                     char str_char) {
+                                                     bool (*predicate)(char)) {
   cmd_word_part_str_part *part = malloc(sizeof(cmd_word_part_str_part));
   part->type = CMD_WORD_PART_STR_PART_TYPE_LITERAL;
   part->value.literal = g_string_new(NULL);
@@ -73,7 +74,7 @@ cmd_word_part_str_part *cmd_parser_parse_str_literal(cmd_parser *parser,
   while (*parser->next != '\0') {
     char c = *parser->next;
 
-    if (is_reg_char(c) || c == ' ') {
+    if (predicate(c)) {
       part->value.literal = g_string_append_c(part->value.literal, c);
     } else {
       return part;
@@ -83,18 +84,24 @@ cmd_word_part_str_part *cmd_parser_parse_str_literal(cmd_parser *parser,
   }
 }
 
+static bool is_str_unquoted_lit_char(char c) { return c != STR_UNQUOTED; }
+
 cmd_word_part_str *cmd_parser_parse_str_unquoted(cmd_parser *parser) {
   parser->next++;
 
   cmd_word_part_str *res = malloc(sizeof(cmd_word_part_str));
   res->quoted = false;
   res->parts = g_list_alloc();
-  res->parts = g_list_append(
-      res->parts, cmd_parser_parse_str_literal(parser, STR_UNQUOTED));
+  res->parts = g_list_append(res->parts, cmd_parser_parse_str_literal(
+                                             parser, is_str_unquoted_lit_char));
 
   parser->next++;
 
   return res;
+}
+
+static bool is_str_quoted_lit_char(char c) {
+  return is_literal_char(c) || c == ' ';
 }
 
 cmd_word_part_str *cmd_parser_parse_str_quoted(cmd_parser *parser) {
@@ -107,9 +114,9 @@ cmd_word_part_str *cmd_parser_parse_str_quoted(cmd_parser *parser) {
   while (*parser->next != '\0') {
     char c = *parser->next;
 
-    if (is_reg_char(c) || c == ' ') {
+    if (is_str_quoted_lit_char(c)) {
       cmd_word_part_str_part *part =
-          cmd_parser_parse_str_literal(parser, STR_QUOTED);
+          cmd_parser_parse_str_literal(parser, is_str_quoted_lit_char);
 
       res->parts = g_list_append(res->parts, part);
     } else if (c == VAR_START) {
@@ -125,7 +132,7 @@ cmd_word_part_str *cmd_parser_parse_str_quoted(cmd_parser *parser) {
 
       return res;
     } else {
-      cmd_parser_err(parser, "unexpected char: %c", c);
+      cmd_parser_err(parser, "str_quoted: unexpected char: %c", c);
     }
   }
 }
@@ -141,7 +148,8 @@ cmd_word_part_str *cmd_parser_parse_str(cmd_parser *parser) {
   }
 
   default: {
-    cmd_parser_err(parser, "unexpected char in string: %c", *parser->next);
+    cmd_parser_err(parser, "parse_str: unexpected char in string: %c",
+                   *parser->next);
   }
   }
 }
@@ -155,7 +163,7 @@ cmd_word_part_var *cmd_parser_parse_var(cmd_parser *parser) {
   while (*parser->next != 0) {
     char c = *parser->next;
 
-    if (is_var_char(c)) {
+    if (is_var_name_char(c)) {
       var->name = g_string_append_c(var->name, c);
     } else {
       return var;
@@ -176,7 +184,7 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
       return word;
     }
 
-    if (is_reg_char(c)) {
+    if (is_literal_char(c)) {
       cmd_word_part_value val = {
           .literal = cmd_parser_parse_word_literal(parser),
       };
@@ -198,7 +206,7 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
 
       word->parts = g_list_append(word->parts, part);
     } else {
-      cmd_parser_err(parser, "unexpected character %c", c);
+      cmd_parser_err(parser, "parse_word: unexpected character %c", c);
     }
   }
 
@@ -228,7 +236,7 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
       return parser->cmd;
     }
 
-    if (is_reg_char(c) || c == STR_UNQUOTED || c == STR_QUOTED ||
+    if (is_literal_char(c) || c == STR_UNQUOTED || c == STR_QUOTED ||
         c == VAR_START) {
       cmd_word *word;
       if ((word = cmd_parser_parse_word(parser)) == NULL) {
@@ -244,7 +252,7 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
       continue;
     }
 
-    cmd_parser_err(parser, "unexpected char %c", c);
+    cmd_parser_err(parser, "parse: unexpected char %c", c);
   }
 
   return parser->cmd;
