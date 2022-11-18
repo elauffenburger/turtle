@@ -264,6 +264,7 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
 
   parser->next = input;
 
+  bool can_set_vars = true;
   while (*parser->next != '\0') {
     char c = *parser->next;
 
@@ -277,14 +278,25 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
     }
 
     // Check if this is a var assignment.
-    if (is_literal_char(c)) {
-      // Peek to the ' '.
+    if (can_set_vars && is_literal_char(c)) {
+      // Peek to the ' '
       char *space_ch = strstr(parser->next, " ");
+
+      // If that failed, try '\n'
+      if (space_ch == NULL) {
+        space_ch = strstr(parser->next, "\n");
+      }
+
+      // If that failed, try NULL
+      if (space_ch == NULL) {
+        space_ch = strstr(parser->next, "\0");
+      }
+
       if (space_ch != NULL) {
         size_t space_index = (size_t)(space_ch - parser->next);
 
         // Peek to the '='.
-        char *var_assign_ch = strnstr(parser->next, "=", space_index);
+        char *var_assign_ch = strnstr(parser->next, "=", space_index - 1);
         if (var_assign_ch != NULL) {
           size_t var_assign_index = (size_t)(var_assign_ch - parser->next);
 
@@ -315,6 +327,8 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
     // Check if this is a word.
     if (is_literal_char(c) || c == STR_UNQUOTED || c == STR_QUOTED ||
         c == VAR_EXPAND_START) {
+      can_set_vars = false;
+
       cmd_word *word;
       if ((word = cmd_parser_parse_word(parser)) == NULL) {
         return NULL;

@@ -26,14 +26,22 @@ int main(int argc, char **argv) {
 
   // Parse args.
   char *cmd_str = NULL;
+  int sleep_time = 0;
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-c") == 0) {
       i++;
       cmd_str = argv[i];
+    } else if (strcmp(argv[i], "--sleep") == 0) {
+      i++;
+      sleep_time = atoi(argv[i]);
     } else {
       giveup("unknown arg %s", argv[i]);
     }
+  }
+
+  if (sleep_time > 0) {
+    sleep(sleep_time);
   }
 
   // If the user specified a single command, run it!
