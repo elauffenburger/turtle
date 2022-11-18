@@ -8,7 +8,8 @@
 
 #define STR_UNQUOTED '\''
 #define STR_QUOTED '"'
-#define VAR_START '$'
+#define VAR_EXPAND_START '$'
+#define VAR_ASSIGN '='
 
 static bool is_alpha(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -41,11 +42,11 @@ static void cmd_parser_err(cmd_parser *parser, char *fmt, ...) {
 }
 #pragma clang diagnostic pop
 
-// cmd_parser_parse_var parses a variable.
+// cmd_parser_parse_var_expand parses a variable expansion.
 //
 // The cursor will be placed after the var name.
 // (e.g. "$var" will be returned and the cursor will be at "/" in "$var/baz").
-cmd_word_part_var *cmd_parser_parse_var(cmd_parser *parser) {
+cmd_word_part_var *cmd_parser_parse_var_expand(cmd_parser *parser) {
   parser->next++;
 
   cmd_word_part_var *var = malloc(sizeof(cmd_word_part_var));
@@ -164,8 +165,8 @@ cmd_word_part_str *cmd_parser_parse_str_quoted(cmd_parser *parser) {
           cmd_parser_parse_str_literal(parser, is_str_quoted_lit_char);
 
       res->parts = g_list_append(res->parts, part);
-    } else if (c == VAR_START) {
-      cmd_word_part_var *var = cmd_parser_parse_var(parser);
+    } else if (c == VAR_EXPAND_START) {
+      cmd_word_part_var *var = cmd_parser_parse_var_expand(parser);
 
       cmd_word_part_str_part *part = malloc(sizeof(cmd_word_part_str_part));
       part->type = CMD_WORD_PART_STR_PART_TYPE_VAR;
@@ -236,9 +237,9 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
       cmd_word_part *part = cmd_word_part_new(CMD_WORD_PART_TYPE_STR, val);
 
       word->parts = g_list_append(word->parts, part);
-    } else if (c == VAR_START) {
+    } else if (c == VAR_EXPAND_START) {
       cmd_word_part_value val = {
-          .var = cmd_parser_parse_var(parser),
+          .var = cmd_parser_parse_var_expand(parser),
       };
       cmd_word_part *part = cmd_word_part_new(CMD_WORD_PART_TYPE_VAR, val);
 
@@ -275,8 +276,45 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
       return parser->cmd;
     }
 
+    // Check if this is a var assignment.
+    if (is_literal_char(c)) {
+      // Peek to the ' '.
+      char *space_ch = strstr(parser->next, " ");
+      if (space_ch != NULL) {
+        size_t space_index = (size_t)(space_ch - parser->next);
+
+        // Peek to the '='.
+        char *var_assign_ch = strnstr(parser->next, "=", space_index);
+        if (var_assign_ch != NULL) {
+          size_t var_assign_index = (size_t)(var_assign_ch - parser->next);
+
+          // Grab the name.
+          char *name = malloc((var_assign_index + 1) * sizeof(char));
+          memcpy(name, parser->next, var_assign_index);
+          name[var_assign_index] = 0;
+
+          // Read the value as the next word on the other side of the '='.
+          parser->next = var_assign_ch + 1;
+          cmd_word *value = cmd_parser_parse_word(parser);
+
+          cmd_var_assign *var = malloc(sizeof(cmd_var_assign));
+          var->name = name;
+          var->value = value;
+
+          cmd_part *part = malloc(sizeof(cmd_part));
+          part->type = CMD_PART_TYPE_VAR_ASSIGN;
+          part->value.var_assign = var;
+
+          parser->cmd->parts = g_list_append(parser->cmd->parts, part);
+
+          continue;
+        }
+      }
+    }
+
+    // Check if this is a word.
     if (is_literal_char(c) || c == STR_UNQUOTED || c == STR_QUOTED ||
-        c == VAR_START) {
+        c == VAR_EXPAND_START) {
       cmd_word *word;
       if ((word = cmd_parser_parse_word(parser)) == NULL) {
         return NULL;

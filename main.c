@@ -1,4 +1,5 @@
 #include "cmd.h"
+#include "cmd_executor.h"
 #include "cmd_parser.h"
 #include "glib.h"
 #include "utils.h"
@@ -42,7 +43,9 @@ int main(int argc, char **argv) {
       giveup("parsing failed");
     }
 
-    cmd_exec(cmd);
+    cmd_executor *executor = cmd_executor_new();
+    cmd_executor_exec(executor, cmd);
+
     exit(0);
   }
 
@@ -61,6 +64,7 @@ int main(int argc, char **argv) {
       giveup("parsing failed");
     }
 
-    cmd_exec(cmd);
+    cmd_executor *executor = cmd_executor_new();
+    cmd_executor_exec(executor, cmd);
   }
 }

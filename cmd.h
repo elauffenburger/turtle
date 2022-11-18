@@ -53,19 +53,28 @@ typedef struct cmd_word_part {
   cmd_word_part_value value;
 } cmd_word_part;
 
-typedef enum cmd_part_type { CMD_PART_TYPE_WORD } cmd_part_type;
+typedef enum cmd_part_type {
+  CMD_PART_TYPE_WORD,
+  CMD_PART_TYPE_VAR_ASSIGN,
+} cmd_part_type;
+
+typedef struct cmd_var_assign {
+  char *name;
+  cmd_word *value;
+} cmd_var_assign;
 
 typedef struct cmd_part {
   cmd_part_type type;
 
   union cmd_part_value {
     cmd_word *word;
+    cmd_var_assign *var_assign;
   } value;
 } cmd_part;
-
-void cmd_exec(cmd *cmd);
 
 cmd_word_part *cmd_word_part_new(cmd_word_part_type type,
                                  cmd_word_part_value val);
 
 cmd *cmd_new(void);
+
+cmd_word *cmd_word_new(cmd_word_part *parts);

@@ -1,7 +1,8 @@
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/errno.h>
 #include <unistd.h>
-#include <stdarg.h>
 
 void giveup(char *fmt, ...) {
   va_list args;
@@ -13,7 +14,9 @@ void giveup(char *fmt, ...) {
   vfprintf(stderr, full_fmt, args);
   va_end(args);
 
-  perror("");
+  if (errno != 3) {
+    perror("");
+  }
 
   exit(1);
 }
