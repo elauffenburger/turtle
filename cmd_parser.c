@@ -10,6 +10,7 @@
 #define STR_QUOTED '"'
 #define VAR_EXPAND_START '$'
 #define VAR_ASSIGN '='
+#define PIPE '|'
 
 static bool is_alpha(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -19,7 +20,8 @@ static bool is_numeric(char c) { return c >= 48 && c <= 57; }
 
 static bool is_literal_char(char c) {
   return !(c == ' ' || c == '\n' || c == '$' || c == '`' || c == '<' ||
-           c == '>' || c == '&' || c == STR_QUOTED || c == STR_UNQUOTED);
+           c == '>' || c == '&' || c == STR_QUOTED || c == STR_UNQUOTED ||
+           c == PIPE);
 }
 
 static bool is_var_name_char(char c) {
@@ -260,7 +262,7 @@ cmd_parser *cmd_parser_new() {
 
 // cmd_parser_parse parses the provided input and returns an executable cmd*.
 cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
-  parser->cmd = cmd_new();
+  cmd *res = cmd_new();
 
   parser->next = input;
 
@@ -274,7 +276,7 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
 
     if (c == '\n') {
       parser->next++;
-      return parser->cmd;
+      return res;
     }
 
     // Check if this is a var assignment.
@@ -317,7 +319,7 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
           part->type = CMD_PART_TYPE_VAR_ASSIGN;
           part->value.var_assign = var;
 
-          parser->cmd->parts = g_list_append(parser->cmd->parts, part);
+          res->parts = g_list_append(res->parts, part);
 
           continue;
         }
@@ -329,16 +331,27 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
         c == VAR_EXPAND_START) {
       can_set_vars = false;
 
-      cmd_word *word;
-      if ((word = cmd_parser_parse_word(parser)) == NULL) {
-        return NULL;
-      }
-
       cmd_part *part = malloc(sizeof(cmd_part));
       part->type = CMD_PART_TYPE_WORD;
-      part->value.word = word;
+      part->value.word = cmd_parser_parse_word(parser);
 
-      parser->cmd->parts = g_list_append(parser->cmd->parts, part);
+      res->parts = g_list_append(res->parts, part);
+
+      continue;
+    }
+
+    // Check if this is a pipe.
+    if (c == PIPE) {
+      parser->next++;
+
+      // Read everything to the right of the pipe as its own cmd.
+      cmd *piped_cmd = cmd_parser_parse(parser, parser->next);
+
+      cmd_part *part = malloc(sizeof(cmd_part));
+      part->type = CMD_PART_TYPE_PIPE;
+      part->value.piped_cmd = piped_cmd;
+
+      res->parts = g_list_append(res->parts, part);
 
       continue;
     }
@@ -346,5 +359,5 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
     cmd_parser_err(parser, "parse: unexpected char %c", c);
   }
 
-  return parser->cmd;
+  return res;
 }

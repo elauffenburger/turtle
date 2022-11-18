@@ -4,8 +4,6 @@
 
 typedef struct cmd_parser {
   char *next;
-
-  cmd *cmd;
 } cmd_parser;
 
 cmd_parser *cmd_parser_new(void);

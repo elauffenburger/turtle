@@ -5,8 +5,11 @@
 
 typedef struct cmd_executor {
   GHashTable *vars;
+
+  int stdin_fno;
+  int stdout_fno;
 } cmd_executor;
 
 cmd_executor *cmd_executor_new(void);
 
-void cmd_executor_exec(cmd_executor *executor, cmd* cmd);
+int cmd_executor_exec(cmd_executor *executor, cmd* cmd);

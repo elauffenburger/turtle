@@ -1,3 +1,4 @@
+#include "glib.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,4 +20,18 @@ void giveup(char *fmt, ...) {
   }
 
   exit(1);
+}
+
+char **g_list_charptr_to_argv(GList *list, int argc) {
+  char **argv = malloc((unsigned long)(argc + 1) * sizeof(char *));
+
+  int i = 0;
+  for (GList *node = list->next; node != NULL; node = node->next) {
+    argv[i] = (char *)node->data;
+    i++;
+  }
+
+  argv[i] = NULL;
+
+  return argv;
 }
