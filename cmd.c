@@ -91,7 +91,7 @@ void cmd_part_free(cmd_part *part) {
   }
 
   default:
-    giveup("cmd_part_free: unknown type");
+    fprintf(stderr, "cmd_word_free: unknown word type\n");
   }
 
   free(part);

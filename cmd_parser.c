@@ -79,6 +79,10 @@ GString *cmd_parser_parse_word_literal(cmd_parser *parser) {
   while (*parser->next != '\0') {
     char c = *parser->next;
 
+    if (parser->in_proc_sub && c == ')') {
+      return literal;
+    }
+
     if (is_literal_char(c)) {
       if (literal == NULL) {
         literal = g_string_new(NULL);
@@ -134,8 +138,8 @@ cmd_word_part_str *cmd_parser_parse_str_unquoted(cmd_parser *parser) {
 
   cmd_word_part_str *res = malloc(sizeof(cmd_word_part_str));
   res->quoted = false;
-  res->parts = g_list_append(NULL, cmd_parser_parse_str_literal(
-                                             parser, is_str_unquoted_lit_char));
+  res->parts = g_list_append(
+      NULL, cmd_parser_parse_str_literal(parser, is_str_unquoted_lit_char));
 
   parser->next++;
 
@@ -220,7 +224,7 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
   while (*parser->next != '\0') {
     char c = *parser->next;
 
-    if (c == ' ' || c == '\n') {
+    if (c == ' ' || c == '\n' || (parser->in_proc_sub && c == ')')) {
       return word;
     }
 
@@ -253,8 +257,28 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
   return word;
 }
 
+// cmd_parser_parse_proc_sub parses a process substitution.
+//
+// The cursor will be placed after the proc sub.
+cmd *cmd_parser_parse_proc_sub(cmd_parser *parser) {
+  if (*parser->next != '$' || *(parser->next + 1) != '(') {
+    cmd_parser_err(parser, "unexpected char in proc sub: %s", parser->next);
+  }
+
+  // Skip the '$('
+  parser->next += 2;
+
+  bool was_in_proc_sub = parser->in_proc_sub;
+  parser->in_proc_sub = true;
+  cmd *cmd = cmd_parser_parse(parser, parser->next);
+  parser->in_proc_sub = was_in_proc_sub;
+
+  return cmd;
+}
+
 cmd_parser *cmd_parser_new() {
   cmd_parser *parser = malloc(sizeof(cmd_parser));
+  parser->in_proc_sub = false;
 
   return parser;
 }
@@ -273,7 +297,7 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
       c = *++parser->next;
     }
 
-    if (c == '\n') {
+    if (c == '\n' || (parser->in_proc_sub && c == ')')) {
       parser->next++;
       return res;
     }
@@ -325,6 +349,18 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
       }
     }
 
+    // Check if this is a process sub.
+    if (c == VAR_EXPAND_START && *(parser->next + 1) == '(') {
+      can_set_vars = false;
+
+      cmd_part *part = malloc(sizeof(cmd_part));
+      part->type = CMD_PART_TYPE_PROC_SUB;
+      part->value.proc_sub = cmd_parser_parse_proc_sub(parser);
+
+      res->parts = g_list_append(res->parts, part);
+      continue;
+    }
+
     // Check if this is a word.
     if (is_literal_char(c) || c == STR_UNQUOTED || c == STR_QUOTED ||
         c == VAR_EXPAND_START) {
@@ -335,12 +371,13 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
       part->value.word = cmd_parser_parse_word(parser);
 
       res->parts = g_list_append(res->parts, part);
-
       continue;
     }
 
     // Check if this is a pipe.
     if (c == PIPE) {
+      can_set_vars = true;
+
       parser->next++;
 
       // Read everything to the right of the pipe as its own cmd.
@@ -351,7 +388,6 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
       part->value.piped_cmd = piped_cmd;
 
       res->parts = g_list_append(res->parts, part);
-
       continue;
     }
 
