@@ -8,6 +8,12 @@
 #include <unistd.h>
 #include <wchar.h>
 
+#pragma clang diagnostic ignored "-Weverything"
+#pragma clang diagnostic push
+#include <readline/history.h>
+#include <readline/readline.h>
+#pragma clang diagnostic pop
+
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic push
 void onexit(int signal) {
@@ -58,21 +64,26 @@ int main(int argc, char **argv) {
   }
 
   // Otherwise, we're in interactive mode.
-  char buf[BUFSIZ];
+  char *line = NULL;
   for (;;) {
-    printf("🐢> ");
-    fflush(stdout);
+    if (line) {
+      free(line);
+      line = NULL;
+    }
 
-    if (fgets(buf, sizeof(buf), stdin) == NULL) {
-      giveup("failed to read from stdin");
+    line = readline("🐢> ");
+    if (line && *line) {
+      add_history(line);
     }
 
     cmd *cmd;
-    if ((cmd = cmd_parser_parse(parser, buf)) == NULL) {
+    if ((cmd = cmd_parser_parse(parser, line)) == NULL) {
       giveup("parsing failed");
     }
 
     cmd_executor *executor = cmd_executor_new();
     cmd_executor_exec(executor, cmd);
+
+    cmd_free(cmd);
   }
 }

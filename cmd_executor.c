@@ -34,7 +34,7 @@ void cmd_executor_set_var(cmd_executor *executor, cmd_var_assign *var) {
 char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
   GString *res = g_string_new(NULL);
 
-  for (GList *node = word->parts->next; node != NULL; node = node->next) {
+  for (GList *node = word->parts; node != NULL; node = node->next) {
     cmd_word_part *part = (cmd_word_part *)node->data;
 
     switch (part->type) {
@@ -46,7 +46,7 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
     case CMD_WORD_PART_TYPE_STR: {
       cmd_word_part_str *str = part->value.str;
       if (str->quoted) {
-        for (GList *str_node = str->parts->next; str_node != NULL;
+        for (GList *str_node = str->parts; str_node != NULL;
              str_node = str_node->next) {
           cmd_word_part_str_part *str_part = str_node->data;
 
@@ -70,7 +70,7 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
           }
         }
       } else {
-        for (GList *str_node = str->parts->next; str_node != NULL;
+        for (GList *str_node = str->parts; str_node != NULL;
              str_node = str_node->next) {
           cmd_word_part_str_part *str_part = str_node->data;
 
@@ -143,9 +143,9 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
   char *file = NULL;
 
   int argc = 0;
-  GList *gargs = g_list_alloc();
+  GList *gargs = NULL;
 
-  for (GList *node = cmd->parts->next; node != NULL; node = node->next) {
+  for (GList *node = cmd->parts; node != NULL; node = node->next) {
     cmd_part *part = (cmd_part *)node->data;
 
     switch (part->type) {

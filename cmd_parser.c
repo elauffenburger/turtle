@@ -134,8 +134,7 @@ cmd_word_part_str *cmd_parser_parse_str_unquoted(cmd_parser *parser) {
 
   cmd_word_part_str *res = malloc(sizeof(cmd_word_part_str));
   res->quoted = false;
-  res->parts = g_list_alloc();
-  res->parts = g_list_append(res->parts, cmd_parser_parse_str_literal(
+  res->parts = g_list_append(NULL, cmd_parser_parse_str_literal(
                                              parser, is_str_unquoted_lit_char));
 
   parser->next++;
@@ -157,7 +156,7 @@ cmd_word_part_str *cmd_parser_parse_str_quoted(cmd_parser *parser) {
 
   cmd_word_part_str *res = malloc(sizeof(cmd_word_part_str));
   res->quoted = true;
-  res->parts = g_list_alloc();
+  res->parts = NULL;
 
   while (*parser->next != '\0') {
     char c = *parser->next;
@@ -216,7 +215,7 @@ cmd_word_part_str *cmd_parser_parse_str(cmd_parser *parser) {
 // (e.g. "foo" will be returned and the cursor will be at ' ' in "foo bar").
 cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
   cmd_word *word = malloc(sizeof(cmd_word));
-  word->parts = g_list_alloc();
+  word->parts = NULL;
 
   while (*parser->next != '\0') {
     char c = *parser->next;

@@ -80,3 +80,5 @@ cmd_word_part *cmd_word_part_new(cmd_word_part_type type,
 cmd *cmd_new(void);
 
 cmd_word *cmd_word_new(cmd_word_part *parts);
+
+void cmd_free(cmd* cmd);

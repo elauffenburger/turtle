@@ -15,24 +15,89 @@ cmd_word_part *cmd_word_part_new(cmd_word_part_type type,
   return part;
 }
 
-cmd_word_part *cmd_word_get_part(cmd_word *word, int part_num) {
-  int i = 0;
-  GList *node = word->parts->next;
-  for (;;) {
-    if (i == part_num) {
-      return (cmd_word_part *)node->data;
-    }
-
-    node = node->next;
-    i++;
-  }
-
-  return NULL;
-}
-
 cmd *cmd_new(void) {
   cmd *cmd = malloc(sizeof(cmd));
-  cmd->parts = g_list_alloc();
+  cmd->parts = NULL;
 
   return cmd;
+}
+
+void cmd_word_part_str_part_free(cmd_word_part_str_part *part) {
+  switch (part->type) {
+  case CMD_WORD_PART_STR_PART_TYPE_LITERAL: {
+    g_string_free(part->value.literal, true);
+    break;
+  }
+
+  case CMD_WORD_PART_STR_PART_TYPE_VAR: {
+    g_string_free(part->value.var->name, true);
+    free(part->value.var);
+    break;
+  }
+  }
+
+  free(part);
+}
+
+void cmd_word_part_free(cmd_word_part *part) {
+  switch (part->type) {
+  case CMD_WORD_PART_TYPE_LIT: {
+    g_string_free(part->value.literal, true);
+    break;
+  }
+
+  case CMD_WORD_PART_TYPE_STR: {
+    for (GList *node = part->value.str->parts; node != NULL;
+         node = node->next) {
+    }
+    g_list_free_full(part->value.str->parts,
+                     (GDestroyNotify)cmd_word_part_str_part_free);
+    free(part->value.str);
+    break;
+  }
+
+  case CMD_WORD_PART_TYPE_VAR: {
+    g_string_free(part->value.var->name, true);
+    free(part->value.var);
+    break;
+  }
+  }
+
+  free(part);
+}
+
+void cmd_word_free(cmd_word *word) {
+  g_list_free_full(word->parts, (GDestroyNotify)cmd_word_part_free);
+  free(word);
+}
+
+void cmd_part_free(cmd_part *part) {
+  switch (part->type) {
+  case CMD_PART_TYPE_VAR_ASSIGN: {
+    free(part->value.var_assign->name);
+    cmd_word_free(part->value.var_assign->value);
+    free(part->value.var_assign);
+    break;
+  }
+
+  case CMD_PART_TYPE_WORD: {
+    cmd_word_free(part->value.word);
+    break;
+  }
+
+  case CMD_PART_TYPE_PIPE: {
+    cmd_free(part->value.piped_cmd);
+    break;
+  }
+
+  default:
+    giveup("cmd_part_free: unknown type");
+  }
+
+  free(part);
+}
+
+void cmd_free(cmd *cmd) {
+  g_list_free_full(cmd->parts, (GDestroyNotify)cmd_part_free);
+  free(cmd);
 }
