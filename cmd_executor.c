@@ -101,6 +101,55 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
       break;
     }
 
+    case CMD_WORD_PART_TYPE_PROC_SUB: {
+      // Keep track of the original fnos.
+      int original_fnos[2] = {executor->stdin_fno, executor->stdout_fno};
+
+      // Create a pipe.
+      int pipe_fnos[2];
+      if (pipe(pipe_fnos) < 0) {
+        giveup("cmd_executor_exec: pipe failed");
+      }
+
+      int status;
+
+      // Write to the write end of the pipe.
+      executor->stdout_fno = pipe_fnos[1];
+      status = cmd_executor_exec(executor, part->value.proc_sub);
+
+      // Restore the executor's stdout and close the write end of the pipe.
+      executor->stdout_fno = original_fnos[1];
+      close(pipe_fnos[1]);
+
+      if (status != 0) {
+        close(pipe_fnos[0]);
+        return status;
+      }
+
+      // Read from the read end of the pipe.
+      GString *arg = g_string_new(NULL);
+      {
+        char buf[BUFSIZ];
+
+        ssize_t n;
+        while ((n = read(pipe_fnos[0], buf, BUFSIZ)) != 0) {
+          // Remove trailing newline.
+          if (n < BUFSIZ) {
+            buf[n - 1] = 0;
+          }
+
+          arg = g_string_append(arg, buf);
+        }
+      }
+
+      // Close the read end of the pipe.
+      close(pipe_fnos[0]);
+
+      res = g_string_append(res, arg->str);
+
+      break;
+    }
+
     default:
       giveup("unimplemented cmd_word_part_type");
     }
@@ -214,57 +263,6 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
       executor->stdin_fno = original_fnos[0];
 
       return status;
-    }
-
-    case CMD_PART_TYPE_PROC_SUB: {
-      // Keep track of the original fnos.
-      int original_fnos[2] = {executor->stdin_fno, executor->stdout_fno};
-
-      // Create a pipe.
-      int pipe_fnos[2];
-      if (pipe(pipe_fnos) < 0) {
-        giveup("cmd_executor_exec: pipe failed");
-      }
-
-      int status;
-
-      // Write to the write end of the pipe.
-      executor->stdout_fno = pipe_fnos[1];
-      status = cmd_executor_exec(executor, part->value.piped_cmd);
-
-      // Restore the executor's stdout and close the write end of the pipe.
-      executor->stdout_fno = original_fnos[1];
-      close(pipe_fnos[1]);
-
-      if (status != 0) {
-        close(pipe_fnos[0]);
-        return status;
-      }
-
-      // Read from the read end of the pipe.
-      GString *arg = g_string_new(NULL);
-      {
-        char buf[BUFSIZ];
-
-        ssize_t n;
-        while ((n = read(pipe_fnos[0], buf, BUFSIZ)) != 0) {
-          // Remove trailing newline.
-          if (n < BUFSIZ) {
-            buf[n - 1] = 0;
-          }
-
-          arg = g_string_append(arg, buf);
-        }
-      }
-
-      // Close the read end of the pipe.
-      close(pipe_fnos[0]);
-
-      // Add the arg.
-      argc++;
-      gargs = g_list_append(gargs, g_string_free(arg, false));
-
-      break;
     }
 
     default:

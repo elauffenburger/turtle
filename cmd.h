@@ -16,6 +16,7 @@ typedef enum cmd_word_part_type {
   CMD_WORD_PART_TYPE_LIT,
   CMD_WORD_PART_TYPE_STR,
   CMD_WORD_PART_TYPE_VAR,
+  CMD_WORD_PART_TYPE_PROC_SUB,
 } cmd_word_part_type;
 
 typedef struct cmd_word_part_var {
@@ -45,6 +46,7 @@ typedef union cmd_word_part_value {
   GString *literal;
   cmd_word_part_str *str;
   cmd_word_part_var *var;
+  cmd *proc_sub;
 } cmd_word_part_value;
 
 typedef struct cmd_word_part {
@@ -57,7 +59,6 @@ typedef enum cmd_part_type {
   CMD_PART_TYPE_WORD,
   CMD_PART_TYPE_VAR_ASSIGN,
   CMD_PART_TYPE_PIPE,
-  CMD_PART_TYPE_PROC_SUB,
 } cmd_part_type;
 
 typedef struct cmd_var_assign {
@@ -72,7 +73,6 @@ typedef struct cmd_part {
     cmd_word *word;
     cmd_var_assign *var_assign;
     cmd *piped_cmd;
-    cmd *proc_sub;
   } value;
 } cmd_part;
 
