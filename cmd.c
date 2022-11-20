@@ -61,6 +61,14 @@ void cmd_word_part_free(cmd_word_part *part) {
     free(part->value.var);
     break;
   }
+
+  case CMD_WORD_PART_TYPE_PROC_SUB: {
+    cmd_free(part->value.proc_sub);
+    break;
+  }
+
+  default:
+    fprintf(stderr, "cmd_word_part_free: unknown word part type\n");
   }
 
   free(part);
@@ -91,7 +99,7 @@ void cmd_part_free(cmd_part *part) {
   }
 
   default:
-    fprintf(stderr, "cmd_word_free: unknown word type\n");
+    fprintf(stderr, "cmd_word_free: unknown part type\n");
   }
 
   free(part);

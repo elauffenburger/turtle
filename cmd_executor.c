@@ -122,8 +122,7 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
       close(pipe_fnos[1]);
 
       if (status != 0) {
-        close(pipe_fnos[0]);
-        return status;
+        // TODO: poison executor.
       }
 
       // Read from the read end of the pipe.
