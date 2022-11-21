@@ -28,7 +28,15 @@ char *cmd_executor_get_var(cmd_executor *executor, cmd_word_part_var *var) {
 
 void cmd_executor_set_var(cmd_executor *executor, cmd_var_assign *var) {
   char *value = cmd_executor_word_to_str(executor, var->value);
-  g_hash_table_insert(executor->vars, var->name, value);
+
+  // Copy the name and value so they don't reference memory owned by the
+  // cmd (which will be freed later).
+  char *name_cpy = malloc((strlen(var->name) + 1) * sizeof(char));
+  char *value_cpy = malloc((strlen(value) + 1) * sizeof(char));
+  strcpy(name_cpy, var->name);
+  strcpy(value_cpy, value);
+
+  g_hash_table_insert(executor->vars, name_cpy, value_cpy);
 }
 
 char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
@@ -267,6 +275,10 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
     default:
       giveup("cmd_executor_exec: not implemented");
     }
+  }
+
+  if (file == NULL) {
+    return 0;
   }
 
   char **argv = g_list_charptr_to_argv(gargs, argc);

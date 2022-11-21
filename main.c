@@ -64,6 +64,7 @@ int main(int argc, char **argv) {
   }
 
   // Otherwise, we're in interactive mode.
+  cmd_executor *executor = cmd_executor_new();
   char *line = NULL;
   for (;;) {
     if (line) {
@@ -81,9 +82,7 @@ int main(int argc, char **argv) {
       giveup("parsing failed");
     }
 
-    cmd_executor *executor = cmd_executor_new();
     cmd_executor_exec(executor, cmd);
-
     cmd_free(cmd);
   }
 }
