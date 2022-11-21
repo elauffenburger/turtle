@@ -16,10 +16,11 @@ cmd_word_part *cmd_word_part_new(cmd_word_part_type type,
 }
 
 cmd *cmd_new(void) {
-  cmd *cmd = malloc(sizeof(cmd));
-  cmd->parts = NULL;
+  cmd *c = malloc(sizeof(cmd));
+  c->parts = NULL;
+  c->vars = g_hash_table_new(g_str_hash, g_str_equal);
 
-  return cmd;
+  return c;
 }
 
 void cmd_word_part_str_part_free(cmd_word_part_str_part *part) {

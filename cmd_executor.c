@@ -6,6 +6,19 @@
 
 char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word);
 
+void set_var(cmd_executor *executor, GHashTable *vars, cmd_var_assign *var) {
+  char *value = cmd_executor_word_to_str(executor, var->value);
+
+  // Copy the name and value so they don't reference memory owned by the
+  // cmd (which will be freed later).
+  char *name_cpy = malloc((strlen(var->name) + 1) * sizeof(char));
+  char *value_cpy = malloc((strlen(value) + 1) * sizeof(char));
+  strcpy(name_cpy, var->name);
+  strcpy(value_cpy, value);
+
+  g_hash_table_insert(vars, name_cpy, value_cpy);
+}
+
 cmd_executor *cmd_executor_new() {
   cmd_executor *executor = malloc(sizeof(cmd_executor));
   executor->vars = g_hash_table_new(g_str_hash, g_str_equal);
@@ -27,16 +40,12 @@ char *cmd_executor_get_var(cmd_executor *executor, cmd_word_part_var *var) {
 }
 
 void cmd_executor_set_var(cmd_executor *executor, cmd_var_assign *var) {
-  char *value = cmd_executor_word_to_str(executor, var->value);
+  set_var(executor, executor->vars, var);
+}
 
-  // Copy the name and value so they don't reference memory owned by the
-  // cmd (which will be freed later).
-  char *name_cpy = malloc((strlen(var->name) + 1) * sizeof(char));
-  char *value_cpy = malloc((strlen(value) + 1) * sizeof(char));
-  strcpy(name_cpy, var->name);
-  strcpy(value_cpy, value);
-
-  g_hash_table_insert(executor->vars, name_cpy, value_cpy);
+void cmd_executor_set_cmd_var(cmd_executor *executor, cmd *cmd,
+                              cmd_var_assign *var) {
+  set_var(executor, cmd->vars, var);
 }
 
 char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
@@ -205,7 +214,13 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
     case CMD_PART_TYPE_VAR_ASSIGN: {
       cmd_var_assign *var = part->value.var_assign;
 
-      cmd_executor_set_var(executor, var);
+      // If this is the only part of the cmd, then set on the executor;
+      // otherwise, this var is just set for the cmd.
+      if (cmd->parts->next == NULL) {
+        cmd_executor_set_var(executor, var);
+      } else {
+        cmd_executor_set_cmd_var(executor, cmd, var);
+      }
       break;
     }
 

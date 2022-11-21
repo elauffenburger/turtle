@@ -5,6 +5,7 @@
 
 typedef struct cmd {
   GList *parts;
+  GHashTable *vars;
 } cmd;
 
 typedef struct cmd_word {
@@ -84,3 +85,5 @@ cmd *cmd_new(void);
 cmd_word *cmd_word_new(cmd_word_part *parts);
 
 void cmd_free(cmd *cmd);
+
+void cmd_set_var(cmd *cmd, cmd_var_assign *var);
