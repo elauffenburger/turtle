@@ -11,6 +11,7 @@
 #define VAR_EXPAND_START '$'
 #define VAR_ASSIGN '='
 #define PIPE '|'
+#define COMMENT '#'
 
 static bool is_alpha(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -26,6 +27,14 @@ static bool is_literal_char(char c) {
 
 static bool is_var_name_char(char c) {
   return is_alpha(c) || is_numeric(c) || c == '_';
+}
+
+static bool is_end_of_line(char c) { return c != '\n' && c != '\0'; }
+
+static inline void parser_consume_to_end_of_line(cmd_parser *parser) {
+  while (!is_end_of_line(*parser->next)) {
+    parser->next++;
+  }
 }
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -243,6 +252,11 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
   while (*parser->next != '\0') {
     char c = *parser->next;
 
+    if (c == COMMENT) {
+      parser_consume_to_end_of_line(parser);
+      return word;
+    }
+
     if (c == ' ' || c == '\n' || (parser->in_proc_sub && c == ')')) {
       return word;
     }
@@ -311,6 +325,11 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
 
     while (c == ' ') {
       c = *++parser->next;
+    }
+
+    if (c == COMMENT) {
+      parser_consume_to_end_of_line(parser);
+      return res;
     }
 
     if (c == '\n' || (parser->in_proc_sub && c == ')')) {
