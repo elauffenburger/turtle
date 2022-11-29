@@ -297,6 +297,10 @@ cmd_parser *cmd_parser_new() {
 
 // cmd_parser_parse parses the provided input and returns an executable cmd*.
 cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
+  if (*input == NULL) {
+    return NULL;
+  }
+
   cmd *res = cmd_new();
 
   parser->next = input;
@@ -395,4 +399,8 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
   }
 
   return res;
+}
+
+cmd *cmd_parser_parse_next(cmd_parser *parser) {
+  return cmd_parser_parse(parser, parser->next);
 }

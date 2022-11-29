@@ -1,6 +1,8 @@
 #include "cmd_executor.h"
 #include "cmd.h"
+#include "cmd_parser.h"
 #include "utils.h"
+#include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -174,7 +176,60 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
   return res->str;
 }
 
-int cmd_executor_fork_exec(cmd_executor *executor, char *file, char **argv) {
+int cmd_executor_exec_script(cmd_executor *executor, char *scriptPath,
+                             char **args) {
+  int fd;
+  if ((fd = open(scriptPath, O_RDONLY)) < 0) {
+    giveup("cmd_executor_exec_script: open failed");
+  }
+
+  GString *file = g_string_new(NULL);
+  char buf[BUFSIZ];
+  int n = 0;
+  while ((n = read(fd, buf, BUFSIZ)) > 0) {
+    file = g_string_append(file, buf);
+  }
+  if (n == -1) {
+    giveup("cmd_executor_exec_script: read failed");
+  }
+
+  cmd_parser *parser = cmd_parser_new();
+  cmd *c = NULL;
+  int status = 0;
+
+  c = cmd_parser_parse(parser, g_string_free(file, false));
+  if ((status = cmd_executor_exec(executor, c)) != 0) {
+    return status;
+  }
+
+  while ((c = cmd_parser_parse_next(parser)) != NULL) {
+    if ((status = cmd_executor_exec(executor, c)) != 0) {
+      return status;
+    }
+  }
+
+  return 0;
+}
+
+int cmd_executor_exec_file(cmd_executor *executor, char *file, char **argv) {
+  if (strcmp(file, ".") == 0) {
+    cmd_parser *parser = cmd_parser_new();
+
+    char *script = NULL;
+    GString *args = g_string_new(NULL);
+    for (char **str = argv + 1; *str != NULL; str++) {
+      if (script == NULL) {
+        script = realpath(*str, NULL);
+        continue;
+      }
+
+      args = g_string_append(args, *str);
+    }
+
+    return cmd_executor_exec_script(executor, script,
+                                    g_string_free(args, false));
+  }
+
   pid_t pid;
   if ((pid = fork()) == 0) {
     if (executor->stdin_fno != STDIN_FILENO) {
@@ -188,13 +243,13 @@ int cmd_executor_fork_exec(cmd_executor *executor, char *file, char **argv) {
     }
 
     execvp(file, argv);
-    giveup("exec failed");
+    giveup("cmd_executor_exec_file: exec '%s' failed", file);
     exit(1);
   }
 
   int status;
   if ((pid = waitpid(pid, &status, 0)) < 0) {
-    giveup("cmd_executor_fork_exec: waitpid failed with pid=%d,status=%d", pid,
+    giveup("cmd_executor_exec_file: waitpid failed with pid=%d,status=%d", pid,
            status);
   }
 
@@ -256,7 +311,7 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
       executor->stdout_fno = pipe_fnos[1];
 
       // Execute the cmd we built.
-      if ((status = cmd_executor_fork_exec(
+      if ((status = cmd_executor_exec_file(
                executor, file, g_list_charptr_to_argv(gargs, argc))) != 0) {
         close(pipe_fnos[0]);
         close(pipe_fnos[1]);
@@ -297,5 +352,5 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
   }
 
   char **argv = g_list_charptr_to_argv(gargs, argc);
-  return cmd_executor_fork_exec(executor, file, argv);
+  return cmd_executor_exec_file(executor, file, argv);
 }

@@ -33,6 +33,8 @@ int main(int argc, char **argv) {
   // Parse args.
   char *cmd_str = NULL;
   unsigned int sleep_time = 0;
+  char *file = NULL;
+  GList *gargs = NULL;
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-c") == 0) {
@@ -42,12 +44,27 @@ int main(int argc, char **argv) {
       i++;
       sleep_time = (unsigned int)atoi(argv[i]);
     } else {
-      giveup("unknown arg %s", argv[i]);
+      if (file == NULL) {
+        file = argv[i];
+      } else {
+        gargs = g_list_append(gargs, argv[i]);
+      }
     }
   }
 
   if (sleep_time > 0) {
     sleep(sleep_time);
+  }
+
+  if (cmd_str == NULL && file != NULL) {
+    GString *cmd_str_builder = g_string_new(NULL);
+    g_string_append(cmd_str_builder, file);
+
+    for (GList *node = gargs; node != NULL; node = node->next) {
+      g_string_append(cmd_str_builder, (char *)node->data);
+    }
+
+    cmd_str = g_string_free(cmd_str_builder, false);
   }
 
   // If the user specified a single command, run it!
