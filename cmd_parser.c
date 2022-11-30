@@ -29,7 +29,7 @@ static bool is_var_name_char(char c) {
   return is_alpha(c) || is_numeric(c) || c == '_';
 }
 
-static bool is_end_of_line(char c) { return c != '\n' && c != '\0'; }
+static bool is_end_of_line(char c) { return c == '\n' || c == '\0'; }
 
 static inline void parser_consume_to_end_of_line(cmd_parser *parser) {
   while (!is_end_of_line(*parser->next)) {
@@ -260,7 +260,6 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
     }
 
     if (c == ';') {
-      parser->next++;
       return word;
     }
 
@@ -309,9 +308,10 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
   return word;
 }
 
-cmd_parser *cmd_parser_new() {
+cmd_parser *cmd_parser_new(char *cmd_str) {
   cmd_parser *parser = malloc(sizeof(cmd_parser));
   parser->in_proc_sub = false;
+  parser->next = cmd_str;
 
   return parser;
 }
@@ -332,6 +332,11 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
 
     while (c == ' ') {
       c = *++parser->next;
+    }
+
+    if (c == ';') {
+      parser->next++;
+      return res;
     }
 
     if (c == COMMENT) {
@@ -376,14 +381,9 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
           parser->next = var_assign_ch + 1;
           cmd_word *value = cmd_parser_parse_word(parser);
 
-          // If the last char in var assignment was a ; then add to env, not
-          // command.
-          bool is_env = *(parser->next - 1) == ';';
-
           cmd_var_assign *var = malloc(sizeof(cmd_var_assign));
           var->name = name;
           var->value = value;
-          var->env = is_env;
 
           cmd_part *part = malloc(sizeof(cmd_part));
           part->type = CMD_PART_TYPE_VAR_ASSIGN;

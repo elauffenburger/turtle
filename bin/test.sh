@@ -20,6 +20,13 @@ t() {
     unset arg_n
 
     actual=$(./build/turtle -c "${args[*]}")
+    exit_code="$?"
+
+    if [[ "$exit_code" != '0' ]]; then
+        echo "- FAIL: $name"
+        echo "  - unexpected exit code $exit_code"
+        return
+    fi
 
     if [[ "$expected" != "$actual" ]]; then
         echo "- FAIL: $name"

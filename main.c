@@ -23,8 +23,6 @@ void onexit(int signal) {
 #pragma clang diagnostic pop
 
 int main(int argc, char **argv) {
-  cmd_parser *parser = cmd_parser_new();
-
   // Set up signal handlers.
   if (signal(SIGINT, SIG_IGN) != SIG_IGN) {
     signal(SIGINT, onexit);
@@ -69,18 +67,19 @@ int main(int argc, char **argv) {
 
   // If the user specified a single command, run it!
   if (cmd_str != NULL) {
-    cmd *cmd;
-    if ((cmd = cmd_parser_parse(parser, cmd_str)) == NULL) {
-      giveup("parsing failed");
-    }
-
+    cmd_parser *parser = cmd_parser_new(cmd_str);
     cmd_executor *executor = cmd_executor_new();
-    cmd_executor_exec(executor, cmd);
+
+    cmd *cmd;
+    while ((cmd = cmd_parser_parse_next(parser)) != NULL) {
+      cmd_executor_exec(executor, cmd);
+    }
 
     exit(0);
   }
 
   // Otherwise, we're in interactive mode.
+  cmd_parser *parser = cmd_parser_new(NULL);
   cmd_executor *executor = cmd_executor_new();
   char *line = NULL;
   for (;;) {
