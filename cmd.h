@@ -6,6 +6,7 @@
 typedef struct cmd {
   GList *parts;
   GHashTable *vars;
+  GHashTable *env_vars;
 } cmd;
 
 typedef struct cmd_word {
@@ -65,6 +66,7 @@ typedef enum cmd_part_type {
 typedef struct cmd_var_assign {
   char *name;
   cmd_word *value;
+  bool env;
 } cmd_var_assign;
 
 typedef struct cmd_part {

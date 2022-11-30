@@ -22,7 +22,7 @@ static bool is_numeric(char c) { return c >= 48 && c <= 57; }
 static bool is_literal_char(char c) {
   return !(c == ' ' || c == '\n' || c == '$' || c == '`' || c == '<' ||
            c == '>' || c == '&' || c == STR_QUOTED || c == STR_UNQUOTED ||
-           c == PIPE);
+           c == PIPE || c == ';');
 }
 
 static bool is_var_name_char(char c) {
@@ -99,6 +99,8 @@ GString *cmd_parser_parse_word_literal(cmd_parser *parser) {
 
       literal = g_string_append_c(literal, c);
     } else if (c == ' ' || c == '\n') {
+      return literal;
+    } else if (c == ';') {
       return literal;
     } else {
       cmd_parser_err(parser, "word_literal: unexpected character %c", c);
@@ -257,6 +259,11 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
       return word;
     }
 
+    if (c == ';') {
+      parser->next++;
+      return word;
+    }
+
     if (c == ' ' || c == '\n' || (parser->in_proc_sub && c == ')')) {
       return word;
     }
@@ -369,9 +376,14 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
           parser->next = var_assign_ch + 1;
           cmd_word *value = cmd_parser_parse_word(parser);
 
+          // If the last char in var assignment was a ; then add to env, not
+          // command.
+          bool is_env = *(parser->next - 1) == ';';
+
           cmd_var_assign *var = malloc(sizeof(cmd_var_assign));
           var->name = name;
           var->value = value;
+          var->env = is_env;
 
           cmd_part *part = malloc(sizeof(cmd_part));
           part->type = CMD_PART_TYPE_VAR_ASSIGN;

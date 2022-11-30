@@ -19,6 +19,7 @@ cmd *cmd_new(void) {
   cmd *c = malloc(sizeof(cmd));
   c->parts = NULL;
   c->vars = g_hash_table_new(g_str_hash, g_str_equal);
+  c->env_vars = g_hash_table_new(g_str_hash, g_str_equal);
 
   return c;
 }
