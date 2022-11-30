@@ -8,41 +8,43 @@ t() {
     name=$1
     shift
 
-    args=()
-    for arg in "$@"; do
-        args+=("$arg")
-    done
+    expected=$(bash -c "$@" 2>&1)
+    expected_exit_code="$?"
 
-    arg_n=${#args[@]}
-    expected=${args[$(($arg_n - 1))]}
-    expected=${expected:1:-1}
-    unset args[$(($arg_n - 1))]
-    unset arg_n
+    actual=$(./build/turtle -c "$@" 2>&1)
+    actual_exit_code="$?"
 
-    actual=$(./build/turtle -c "${args[*]}")
-    exit_code="$?"
+    local outputs_match
+    [[ "$actual" == "$expected" ]] && outputs_match=true
 
-    if [[ "$exit_code" != '0' ]]; then
-        echo "- FAIL: $name"
-        echo "  - unexpected exit code $exit_code"
+    local status_codes_match
+    [[ "$actual_exit_code" == "$expected_exit_code" ]] && status_codes_match=true
+
+    if [[ "$outputs_match" == 'true' && "$status_codes_match" == 'true' ]]; then
+        echo "- PASS: $name"
         return
     fi
 
-    if [[ "$expected" != "$actual" ]]; then
-        echo "- FAIL: $name"
+    echo "- FAIL: $name"
+
+    if [[ "$status_codes_match" != 'true' ]]; then
+        echo "  - expected exit code: $expected_exit_code"
+        echo "  - actual exit code: $actual_exit_code"
+    fi
+
+    if [[ "$status_codes_match" != 'true' ]]; then
         echo "  - expected: '$expected'"
         echo "  - actual: '$actual'"
-    else
-        echo "- PASS: $name"
     fi
 }
 
 tests() {
-    t 'vars' 'foo=bar; echo $foo' "'bar'"
-    t 'vars - env' 'foo=bar echo $foo' ""
-    t 'comments' 'echo foo bar baz #foo bar' "'foo bar baz'"
-    t 'process sub' 'echo $(echo foo) $(echo bar)' "'foo bar'"
-    t 'dot source' ". <(echo 'echo foo')" "'foo'"
+    t 'vars' 'foo=bar; echo $foo'
+    t 'vars - env' 'foo=bar echo $foo'
+    t 'pipes' 'echo world | xargs -I{} echo "hello {}!"'
+    t 'comments' 'echo foo bar baz #foo bar'
+    t 'process sub' 'echo $(echo foo) $(echo bar)'
+    t 'dot source' ". <(echo 'echo foo')"
 }
 
 main() {
