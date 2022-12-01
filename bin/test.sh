@@ -44,7 +44,9 @@ tests() {
     t 'pipes' 'echo world | xargs -I{} echo "hello {}!"'
     t 'comments' 'echo foo bar baz #foo bar'
     t 'command sub' 'echo $(echo foo) $(echo bar)'
+    t 'proc sub' 'cat <(echo foo bar)'
     t 'dot source' ". <(echo 'echo foo')"
+    t 'multiple stmts' 'echo foo; echo bar;'
 }
 
 main() {

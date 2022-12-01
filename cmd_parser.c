@@ -259,11 +259,7 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
       return word;
     }
 
-    if (c == ';') {
-      return word;
-    }
-
-    if (c == ' ' || c == '\n' || (parser->in_cmd_sub && c == ')')) {
+    if (c == ' ' || c == '\n' || c == ';' || (parser->in_cmd_sub && c == ')')) {
       return word;
     }
 
@@ -334,17 +330,12 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
       c = *++parser->next;
     }
 
-    if (c == ';') {
-      parser->next++;
-      return res;
-    }
-
     if (c == COMMENT) {
       parser_consume_to_end_of_line(parser);
       return res;
     }
 
-    if (c == '\n' || (parser->in_cmd_sub && c == ')')) {
+    if (c == '\n' || c == ';' || (parser->in_cmd_sub && c == ')')) {
       parser->next++;
       return res;
     }
