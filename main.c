@@ -72,7 +72,10 @@ int main(int argc, char **argv) {
 
     cmd *cmd;
     while ((cmd = cmd_parser_parse_next(parser)) != NULL) {
-      cmd_executor_exec(executor, cmd);
+      int status;
+      if ((status = cmd_executor_exec(executor, cmd)) != 0) {
+        exit(status);
+      }
     }
 
     exit(0);

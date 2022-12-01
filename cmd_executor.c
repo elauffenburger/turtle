@@ -166,8 +166,43 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c, cmd_word *word) {
       break;
     }
 
+    case CMD_WORD_PART_TYPE_PROC_SUB: {
+      // Create a pipe.
+      int pipe_fds[2];
+      if (pipe(pipe_fds) != 0) {
+        giveup("cmd_executor_word_to_str: pipe failed");
+      }
+
+      int original_out_fd = executor->stdout_fno;
+
+      // Redirect executor output to the write end of the pipe.
+      executor->stdout_fno = pipe_fds[1];
+
+      // Execute the command.
+      int status;
+      if ((status = cmd_executor_exec(executor, part->value.proc_sub)) != 0) {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+
+        executor->stdout_fno = original_out_fd;
+
+        cmd_executor_error(executor, status);
+      }
+
+      // Close the write end.
+      close(pipe_fds[1]);
+
+      // Restore the original stdout fd.
+      executor->stdout_fno = original_out_fd;
+
+      // Append "/dev/fd/{pipe_read_end_fd}"
+      g_string_append_printf(res, "/dev/fd/%d", pipe_fds[0]);
+
+      break;
+    }
+
     default:
-      giveup("unimplemented cmd_word_part_type");
+      giveup("cmd_executor_exec: unimplemented cmd_word_part_type");
     }
   }
 
@@ -210,20 +245,7 @@ int cmd_executor_exec_script(cmd_executor *executor, char *scriptPath,
 }
 
 int cmd_executor_dot_source(cmd_executor *executor, char **argv) {
-  cmd_parser *parser = cmd_parser_new(NULL);
-
-  char *script = NULL;
-  GString *args = g_string_new(NULL);
-  for (char **str = argv + 1; *str != NULL; str++) {
-    if (script == NULL) {
-      script = realpath(*str, NULL);
-      continue;
-    }
-
-    args = g_string_append(args, *str);
-  }
-
-  return cmd_executor_exec_script(executor, script, g_string_free(args, false));
+  return cmd_executor_exec_script(executor, argv[0], argv);
 }
 
 int cmd_executor_exec_term(cmd_executor *executor, char *term, char **argv) {
@@ -264,9 +286,9 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
   GList *gargs = NULL;
 
   // Set up executor err jump.
-  int status;
-  if ((status = setjmp(executor->err_jmp)) != 0) {
-    return status;
+  int err_status;
+  if ((err_status = setjmp(executor->err_jmp)) != 0) {
+    return err_status;
   }
 
   for (GList *node = cmd->parts; node != NULL; node = node->next) {

@@ -13,13 +13,6 @@ typedef struct cmd_word {
   GList *parts;
 } cmd_word;
 
-typedef enum cmd_word_part_type {
-  CMD_WORD_PART_TYPE_LIT,
-  CMD_WORD_PART_TYPE_STR,
-  CMD_WORD_PART_TYPE_VAR,
-  CMD_WORD_PART_TYPE_CMD_SUB,
-} cmd_word_part_type;
-
 typedef struct cmd_word_part_var {
   GString *name;
 } cmd_word_part_var;
@@ -43,11 +36,20 @@ typedef struct cmd_word_part_str {
   GList *parts;
 } cmd_word_part_str;
 
+typedef enum cmd_word_part_type {
+  CMD_WORD_PART_TYPE_LIT,
+  CMD_WORD_PART_TYPE_STR,
+  CMD_WORD_PART_TYPE_VAR,
+  CMD_WORD_PART_TYPE_CMD_SUB,
+  CMD_WORD_PART_TYPE_PROC_SUB,
+} cmd_word_part_type;
+
 typedef union cmd_word_part_value {
   GString *literal;
   cmd_word_part_str *str;
   cmd_word_part_var *var;
   cmd *cmd_sub;
+  cmd *proc_sub;
 } cmd_word_part_value;
 
 typedef struct cmd_word_part {
