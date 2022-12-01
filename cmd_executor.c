@@ -118,7 +118,7 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c, cmd_word *word) {
       break;
     }
 
-    case CMD_WORD_PART_TYPE_PROC_SUB: {
+    case CMD_WORD_PART_TYPE_CMD_SUB: {
       // Keep track of the original fnos.
       int original_fnos[2] = {executor->stdin_fno, executor->stdout_fno};
 
@@ -132,7 +132,7 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c, cmd_word *word) {
 
       // Write to the write end of the pipe.
       executor->stdout_fno = pipe_fnos[1];
-      status = cmd_executor_exec(executor, part->value.proc_sub);
+      status = cmd_executor_exec(executor, part->value.cmd_sub);
 
       // Restore the executor's stdout and close the write end of the pipe.
       executor->stdout_fno = original_fnos[1];

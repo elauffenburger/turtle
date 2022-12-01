@@ -43,7 +43,7 @@ tests() {
     t 'vars - env' 'foo=bar echo $foo'
     t 'pipes' 'echo world | xargs -I{} echo "hello {}!"'
     t 'comments' 'echo foo bar baz #foo bar'
-    t 'process sub' 'echo $(echo foo) $(echo bar)'
+    t 'command sub' 'echo $(echo foo) $(echo bar)'
     t 'dot source' ". <(echo 'echo foo')"
 }
 

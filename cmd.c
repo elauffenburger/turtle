@@ -63,8 +63,8 @@ void cmd_word_part_free(cmd_word_part *part) {
     break;
   }
 
-  case CMD_WORD_PART_TYPE_PROC_SUB: {
-    cmd_free(part->value.proc_sub);
+  case CMD_WORD_PART_TYPE_CMD_SUB: {
+    cmd_free(part->value.cmd_sub);
     break;
   }
 
