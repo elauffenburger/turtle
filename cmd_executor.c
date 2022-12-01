@@ -3,10 +3,15 @@
 #include "cmd_parser.h"
 #include "utils.h"
 #include <fcntl.h>
+#include <setjmp.h>
 #include <stdio.h>
 #include <unistd.h>
 
 char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c, cmd_word *word);
+
+static void cmd_executor_error(cmd_executor *executor, int status) {
+  longjmp(executor->err_jmp, status);
+}
 
 cmd_executor *cmd_executor_new() {
   cmd_executor *executor = malloc(sizeof(cmd_executor));
@@ -17,7 +22,8 @@ cmd_executor *cmd_executor_new() {
   return executor;
 }
 
-char *cmd_executor_get_var(cmd_executor *executor, cmd_word_part_var *var) {
+static char *cmd_executor_get_var(cmd_executor *executor,
+                                  cmd_word_part_var *var) {
   // Check if we have a var def for the command.
   char *var_val = g_hash_table_lookup(executor->vars, var->name->str);
   if (var_val != NULL) {
@@ -133,7 +139,7 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c, cmd_word *word) {
       close(pipe_fnos[1]);
 
       if (status != 0) {
-        // TODO: poison executor.
+        cmd_executor_error(executor, status);
       }
 
       // Read from the read end of the pipe.
@@ -175,11 +181,11 @@ int cmd_executor_exec_script(cmd_executor *executor, char *scriptPath,
     giveup("cmd_executor_exec_script: open failed");
   }
 
-  GString *file = g_string_new(NULL);
+  GString *term = g_string_new(NULL);
   char buf[BUFSIZ];
   int n = 0;
   while ((n = read(fd, buf, BUFSIZ)) > 0) {
-    file = g_string_append(file, buf);
+    term = g_string_append(term, buf);
   }
   if (n == -1) {
     giveup("cmd_executor_exec_script: read failed");
@@ -189,7 +195,7 @@ int cmd_executor_exec_script(cmd_executor *executor, char *scriptPath,
   cmd *c = NULL;
   int status = 0;
 
-  c = cmd_parser_parse(parser, g_string_free(file, false));
+  c = cmd_parser_parse(parser, g_string_free(term, false));
   if ((status = cmd_executor_exec(executor, c)) != 0) {
     return status;
   }
@@ -203,23 +209,26 @@ int cmd_executor_exec_script(cmd_executor *executor, char *scriptPath,
   return 0;
 }
 
-int cmd_executor_exec_file(cmd_executor *executor, char *file, char **argv) {
-  if (strcmp(file, ".") == 0) {
-    cmd_parser *parser = cmd_parser_new(NULL);
+int cmd_executor_dot_source(cmd_executor *executor, char **argv) {
+  cmd_parser *parser = cmd_parser_new(NULL);
 
-    char *script = NULL;
-    GString *args = g_string_new(NULL);
-    for (char **str = argv + 1; *str != NULL; str++) {
-      if (script == NULL) {
-        script = realpath(*str, NULL);
-        continue;
-      }
-
-      args = g_string_append(args, *str);
+  char *script = NULL;
+  GString *args = g_string_new(NULL);
+  for (char **str = argv + 1; *str != NULL; str++) {
+    if (script == NULL) {
+      script = realpath(*str, NULL);
+      continue;
     }
 
-    return cmd_executor_exec_script(executor, script,
-                                    g_string_free(args, false));
+    args = g_string_append(args, *str);
+  }
+
+  return cmd_executor_exec_script(executor, script, g_string_free(args, false));
+}
+
+int cmd_executor_exec_term(cmd_executor *executor, char *term, char **argv) {
+  if (strcmp(term, ".") == 0) {
+    return cmd_executor_dot_source(executor, argv);
   }
 
   pid_t pid;
@@ -234,14 +243,14 @@ int cmd_executor_exec_file(cmd_executor *executor, char *file, char **argv) {
       dup(executor->stdout_fno);
     }
 
-    execvp(file, argv);
-    giveup("cmd_executor_exec_file: exec '%s' failed", file);
+    execvp(term, argv);
+    giveup("cmd_executor_exec_term: exec '%s' failed", term);
     exit(1);
   }
 
   int status;
   if ((pid = waitpid(pid, &status, 0)) < 0) {
-    giveup("cmd_executor_exec_file: waitpid failed with pid=%d,status=%d", pid,
+    giveup("cmd_executor_exec_term: waitpid failed with pid=%d,status=%d", pid,
            status);
   }
 
@@ -249,10 +258,16 @@ int cmd_executor_exec_file(cmd_executor *executor, char *file, char **argv) {
 }
 
 int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
-  char *file = NULL;
+  char *term = NULL;
 
   int argc = 0;
   GList *gargs = NULL;
+
+  // Set up executor err jump.
+  int status;
+  if ((status = setjmp(executor->err_jmp)) != 0) {
+    return status;
+  }
 
   for (GList *node = cmd->parts; node != NULL; node = node->next) {
     cmd_part *part = (cmd_part *)node->data;
@@ -276,11 +291,11 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
 
     case CMD_PART_TYPE_WORD: {
       char *word = cmd_executor_word_to_str(executor, cmd, part->value.word);
-      if (file == NULL) {
+      if (term == NULL) {
         argc++;
 
-        file = word;
-        gargs = g_list_append(gargs, file);
+        term = word;
+        gargs = g_list_append(gargs, term);
       } else {
         argc++;
 
@@ -306,8 +321,8 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
       executor->stdout_fno = pipe_fnos[1];
 
       // Execute the cmd we built.
-      if ((status = cmd_executor_exec_file(
-               executor, file, g_list_charptr_to_argv(gargs, argc))) != 0) {
+      if ((status = cmd_executor_exec_term(
+               executor, term, g_list_charptr_to_argv(gargs, argc))) != 0) {
         close(pipe_fnos[0]);
         close(pipe_fnos[1]);
 
@@ -342,10 +357,10 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
     }
   }
 
-  if (file == NULL) {
+  if (term == NULL) {
     return 0;
   }
 
   char **argv = g_list_charptr_to_argv(gargs, argc);
-  return cmd_executor_exec_file(executor, file, argv);
+  return cmd_executor_exec_term(executor, term, argv);
 }
