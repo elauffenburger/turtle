@@ -374,6 +374,34 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
       return status;
     }
 
+    case CMD_PART_TYPE_OR: {
+      // Execute the command as-is.
+      char **argv = g_list_charptr_to_argv(gargs, argc);
+      int status = cmd_executor_exec_term(executor, term, argv);
+
+      // If the result is 0, we're done!
+      if (status == 0) {
+        return status;
+      }
+
+      // Otherwise, execute the or'd command.
+      return cmd_executor_exec(executor, part->value.or_cmd);
+    }
+
+    case CMD_PART_TYPE_AND: {
+      // Execute the command as-is.
+      char **argv = g_list_charptr_to_argv(gargs, argc);
+      int status = cmd_executor_exec_term(executor, term, argv);
+
+      // If the result non-zero, bail!
+      if (status != 0) {
+        return status;
+      }
+
+      // Otherwise, execute the and'd command.
+      return cmd_executor_exec(executor, part->value.and_cmd);
+    }
+
     default:
       giveup("cmd_executor_exec: not implemented");
     }

@@ -6,7 +6,6 @@ typedef struct cmd_parser {
   char *next;
 
   bool in_sub;
-  bool in_proc_sub;
 } cmd_parser;
 
 cmd_parser *cmd_parser_new(char *cmd_str);

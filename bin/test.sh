@@ -57,8 +57,13 @@ tests() {
     t 'comments' 'echo foo bar baz #foo bar'
     t 'command sub' 'echo $(echo foo) $(echo bar)'
     t 'proc sub' 'cat <(echo foo bar)'
-    t 'dot source' ". <(echo 'echo foo')"
     t 'multiple stmts' 'echo foo; echo bar;'
+    t 'and - true' 'true && echo foo'
+    t 'and - false' 'false && echo foo'
+    t 'or - true' 'true || echo foo'
+    t 'or - false' 'false || echo foo'
+
+    t 'dot source' ". <(echo 'echo foo')"
 }
 
 main() {

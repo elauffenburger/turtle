@@ -62,6 +62,8 @@ typedef enum cmd_part_type {
   CMD_PART_TYPE_WORD,
   CMD_PART_TYPE_VAR_ASSIGN,
   CMD_PART_TYPE_PIPE,
+  CMD_PART_TYPE_OR,
+  CMD_PART_TYPE_AND,
 } cmd_part_type;
 
 typedef struct cmd_var_assign {
@@ -76,6 +78,8 @@ typedef struct cmd_part {
     cmd_word *word;
     cmd_var_assign *var_assign;
     cmd *piped_cmd;
+    cmd *or_cmd;
+    cmd *and_cmd;
   } value;
 } cmd_part;
 

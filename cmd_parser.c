@@ -412,20 +412,58 @@ cmd *cmd_parser_parse(cmd_parser *parser, char *input) {
       continue;
     }
 
-    // Check if this is a pipe.
+    // Check if this is a background proc or an AND.
+    if (c == '&') {
+      parser->next++;
+
+      if (*parser->next == '&') {
+        can_set_vars = true;
+
+        parser->next++;
+
+        // Read everything to the right of the AND as its own cmd.
+        cmd *and_cmd = cmd_parser_parse(parser, parser->next);
+
+        cmd_part *part = malloc(sizeof(cmd_part));
+        part->type = CMD_PART_TYPE_AND;
+        part->value.and_cmd = and_cmd;
+
+        res->parts = g_list_append(res->parts, part);
+      } else {
+        giveup("parse: background procs not implemented");
+      }
+
+      continue;
+    }
+
+    // Check if this is a pipe or an OR.
     if (c == PIPE) {
       can_set_vars = true;
 
       parser->next++;
 
-      // Read everything to the right of the pipe as its own cmd.
-      cmd *piped_cmd = cmd_parser_parse(parser, parser->next);
+      if (*parser->next == '|') {
+        parser->next++;
 
-      cmd_part *part = malloc(sizeof(cmd_part));
-      part->type = CMD_PART_TYPE_PIPE;
-      part->value.piped_cmd = piped_cmd;
+        // Read everything to the right of the OR as its own cmd.
+        cmd *or_cmd = cmd_parser_parse(parser, parser->next);
 
-      res->parts = g_list_append(res->parts, part);
+        cmd_part *part = malloc(sizeof(cmd_part));
+        part->type = CMD_PART_TYPE_OR;
+        part->value.or_cmd = or_cmd;
+
+        res->parts = g_list_append(res->parts, part);
+      } else {
+        // Read everything to the right of the pipe as its own cmd.
+        cmd *piped_cmd = cmd_parser_parse(parser, parser->next);
+
+        cmd_part *part = malloc(sizeof(cmd_part));
+        part->type = CMD_PART_TYPE_PIPE;
+        part->value.piped_cmd = piped_cmd;
+
+        res->parts = g_list_append(res->parts, part);
+      }
+
       continue;
     }
 
