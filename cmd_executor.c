@@ -5,9 +5,11 @@
 #include <fcntl.h>
 #include <setjmp.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
-char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c, cmd_word *word);
+static char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c,
+                                      cmd_word *word);
 
 static void cmd_executor_error(cmd_executor *executor, int status) {
   longjmp(executor->err_jmp, status);
@@ -48,7 +50,8 @@ static void set_var(cmd_executor *executor, cmd *c, cmd_var_assign *var,
   g_hash_table_insert(vars, name_cpy, value_cpy);
 }
 
-char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c, cmd_word *word) {
+static char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c,
+                                      cmd_word *word) {
   GString *res = g_string_new(NULL);
 
   for (GList *node = word->parts; node != NULL; node = node->next) {
@@ -167,36 +170,45 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c, cmd_word *word) {
     }
 
     case CMD_WORD_PART_TYPE_PROC_SUB: {
-      // Create a pipe.
-      int pipe_fds[2];
-      if (pipe(pipe_fds) != 0) {
-        giveup("cmd_executor_word_to_str: pipe failed");
+      char file_name[] = "/tmp/turtle-proc-XXXXXX";
+      int fd;
+      if ((fd = mkstemp(file_name)) < 0) {
+        giveup("cmd_executor_exec: proc sub file creation failed");
+      }
+
+      // Give permission rwx permissions to everyone.
+      if (chmod(file_name, 0777) < 0) {
+        giveup("cmd_executor_exec: proc sub file chmod failed");
       }
 
       int original_out_fd = executor->stdout_fno;
 
       // Redirect executor output to the write end of the pipe.
-      executor->stdout_fno = pipe_fds[1];
+      executor->stdout_fno = fd;
 
       // Execute the command.
       int status;
       if ((status = cmd_executor_exec(executor, part->value.proc_sub)) != 0) {
-        close(pipe_fds[0]);
-        close(pipe_fds[1]);
+        close(fd);
 
         executor->stdout_fno = original_out_fd;
 
         cmd_executor_error(executor, status);
       }
 
-      // Close the write end.
-      close(pipe_fds[1]);
+      // Close the file.
+      close(fd);
+
+      // Reopen the file with the correct flags.
+      if ((fd = open(file_name, O_RDONLY)) < 0) {
+        giveup("cmd_executor_exec: proc_sub reopen failed");
+      }
 
       // Restore the original stdout fd.
       executor->stdout_fno = original_out_fd;
 
       // Append "/dev/fd/{pipe_read_end_fd}"
-      g_string_append_printf(res, "/dev/fd/%d", pipe_fds[0]);
+      g_string_append_printf(res, "%s", file_name);
 
       break;
     }
@@ -209,48 +221,11 @@ char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c, cmd_word *word) {
   return res->str;
 }
 
-int cmd_executor_exec_script(cmd_executor *executor, char *scriptPath,
-                             char **args) {
-  int fd;
-  if ((fd = open(scriptPath, O_RDONLY)) < 0) {
-    giveup("cmd_executor_exec_script: open failed");
-  }
-
-  GString *term = g_string_new(NULL);
-  char buf[BUFSIZ];
-  int n = 0;
-  while ((n = read(fd, buf, BUFSIZ)) > 0) {
-    term = g_string_append(term, buf);
-  }
-  if (n == -1) {
-    giveup("cmd_executor_exec_script: read failed");
-  }
-
-  cmd_parser *parser = cmd_parser_new(NULL);
-  cmd *c = NULL;
-  int status = 0;
-
-  c = cmd_parser_parse(parser, g_string_free(term, false));
-  if ((status = cmd_executor_exec(executor, c)) != 0) {
-    return status;
-  }
-
-  while ((c = cmd_parser_parse_next(parser)) != NULL) {
-    if ((status = cmd_executor_exec(executor, c)) != 0) {
-      return status;
-    }
-  }
-
-  return 0;
-}
-
-int cmd_executor_dot_source(cmd_executor *executor, char **argv) {
-  return cmd_executor_exec_script(executor, argv[0], argv);
-}
-
 int cmd_executor_exec_term(cmd_executor *executor, char *term, char **argv) {
   if (strcmp(term, ".") == 0) {
-    return cmd_executor_dot_source(executor, argv);
+    argv++;
+
+    return cmd_executor_exec_term(executor, argv[0], argv);
   }
 
   pid_t pid;

@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
   // Parse args.
   char *cmd_str = NULL;
   unsigned int sleep_time = 0;
-  char *file = NULL;
+  char *script_filename = NULL;
   GList *gargs = NULL;
 
   for (int i = 1; i < argc; i++) {
@@ -40,8 +40,8 @@ int main(int argc, char **argv) {
       i++;
       sleep_time = (unsigned int)atoi(argv[i]);
     } else {
-      if (file == NULL) {
-        file = argv[i];
+      if (script_filename == NULL) {
+        script_filename = argv[i];
       } else {
         gargs = g_list_append(gargs, argv[i]);
       }
@@ -52,20 +52,32 @@ int main(int argc, char **argv) {
     sleep(sleep_time);
   }
 
-  if (cmd_str == NULL && file != NULL) {
-    GString *cmd_str_builder = g_string_new(NULL);
-    g_string_append(cmd_str_builder, file);
+  if (script_filename != NULL) {
+    cmd_parser *parser = cmd_parser_new();
+    cmd_executor *executor = cmd_executor_new();
+    int status;
 
-    for (GList *node = gargs; node != NULL; node = node->next) {
-      g_string_append(cmd_str_builder, (char *)node->data);
+    FILE *script_file = fopen(script_filename, "r");
+
+    char line[BUFSIZ];
+    while ((fgets(line, sizeof(line), script_file)) != NULL) {
+      cmd_parser_set_next(parser, line);
+
+      cmd *cmd = cmd_parser_parse_next(parser);
+      if ((status = cmd_executor_exec(executor, cmd)) != 0) {
+        return status;
+      }
+
+      cmd_free(cmd);
     }
 
-    cmd_str = g_string_free(cmd_str_builder, false);
+    exit(0);
   }
 
   // If the user specified a single command, run it!
   if (cmd_str != NULL) {
-    cmd_parser *parser = cmd_parser_new(cmd_str);
+    cmd_parser *parser = cmd_parser_new();
+    cmd_parser_set_next(parser, cmd_str);
     cmd_executor *executor = cmd_executor_new();
 
     cmd *cmd;
@@ -80,9 +92,10 @@ int main(int argc, char **argv) {
   }
 
   // Otherwise, we're in interactive mode.
-  cmd_parser *parser = cmd_parser_new(NULL);
+  cmd_parser *parser = cmd_parser_new();
   cmd_executor *executor = cmd_executor_new();
   char *line = NULL;
+  int status;
   for (;;) {
     if (line) {
       free(line);
@@ -94,16 +107,14 @@ int main(int argc, char **argv) {
       add_history(line);
     }
 
+    cmd_parser_set_next(parser, line);
+
     cmd *cmd;
-    if ((cmd = cmd_parser_parse(parser, line)) == NULL) {
-      giveup("parsing failed");
-    }
-
-    cmd_executor_exec(executor, cmd);
-    cmd_free(cmd);
-
     while ((cmd = cmd_parser_parse_next(parser)) != NULL) {
-      cmd_executor_exec(executor, cmd);
+      if ((status = cmd_executor_exec(executor, cmd)) != 0) {
+        return status;
+      }
+
       cmd_free(cmd);
     }
   }

@@ -158,7 +158,7 @@ cmd_word_part_str *cmd_parser_parse_str_unquoted(cmd_parser *parser) {
 }
 
 static bool is_str_quoted_lit_char(char c) {
-  return is_literal_char(c) || c == ' ';
+  return is_literal_char(c) || c == ' ' || c == ';';
 }
 
 // cmd_parser_parse_sub parses a command or process substitution.
@@ -316,12 +316,16 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
   return word;
 }
 
-cmd_parser *cmd_parser_new(char *cmd_str) {
+cmd_parser *cmd_parser_new() {
   cmd_parser *parser = malloc(sizeof(cmd_parser));
   parser->in_sub = false;
-  parser->next = cmd_str;
 
   return parser;
+}
+
+void cmd_parser_set_next(cmd_parser* parser, char* next) {
+  parser->in_sub = false;
+  parser->next = next;
 }
 
 // cmd_parser_parse parses the provided input and returns an executable cmd*.
