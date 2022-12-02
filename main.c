@@ -5,6 +5,7 @@
 #include "utils.h"
 #include <locale.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <wchar.h>
 
@@ -14,13 +15,10 @@
 #include <readline/readline.h>
 #pragma clang diagnostic pop
 
-#pragma clang diagnostic ignored "-Wunused-parameter"
-#pragma clang diagnostic push
 void onexit(int signal) {
   fputs("bye!\n", stderr);
   exit(0);
 }
-#pragma clang diagnostic pop
 
 int main(int argc, char **argv) {
   // Set up signal handlers.
@@ -103,5 +101,12 @@ int main(int argc, char **argv) {
 
     cmd_executor_exec(executor, cmd);
     cmd_free(cmd);
+
+    while ((cmd = cmd_parser_parse_next(parser)) != NULL) {
+      cmd_executor_exec(executor, cmd);
+      cmd_free(cmd);
+    }
   }
+
+  exit(0);
 }

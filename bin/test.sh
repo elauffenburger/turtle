@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+profile=false
+
 usage() {
     echo "usage: $0 [--no-build]"
 }
@@ -8,10 +10,14 @@ t() {
     name=$1
     shift
 
-    expected=$(bash -c "$@" 2>&1)
+    expected_with_time=$(/usr/bin/env bash -c "time /usr/bin/env bash -c \"$@\"" 2>&1)
+    expected=$(head -n -3 <<<"$expected_with_time")
+    expected_time=$(tail -n -3 <<<"$expected_with_time" | tr '\n' ' ')
     expected_exit_code="$?"
 
-    actual=$(./build/turtle -c "$@" 2>&1)
+    actual_with_time=$(/usr/bin/env bash -c "time ./build/turtle -c \"$@\"" 2>&1)
+    actual=$(head -n -3 <<<"$actual_with_time")
+    actual_time=$(tail -n -3 <<<"$actual_with_time" | tr '\n' ' ')
     actual_exit_code="$?"
 
     local outputs_match
@@ -22,6 +28,12 @@ t() {
 
     if [[ "$outputs_match" == 'true' && "$status_codes_match" == 'true' ]]; then
         echo "- PASS: $name"
+
+        if [[ "$profile" == 'true' ]]; then
+            echo "  - expected time: $expected_time"
+            echo "  - actual time  : $actual_time"
+        fi
+
         return
     fi
 
@@ -29,12 +41,12 @@ t() {
 
     if [[ "$status_codes_match" != 'true' ]]; then
         echo "  - expected exit code: $expected_exit_code"
-        echo "  - actual exit code: $actual_exit_code"
+        echo "  - actual exit code  : $actual_exit_code"
     fi
 
-    if [[ "$status_codes_match" != 'true' ]]; then
-        echo "  - expected: '$expected'"
-        echo "  - actual: '$actual'"
+    if [[ "$outputs_match" != 'true' ]]; then
+        echo "  - expected: $expected"
+        echo "  - actual  : $actual"
     fi
 }
 
@@ -55,6 +67,9 @@ main() {
         case $1 in
         '--no-build')
             skip_build=true
+            ;;
+        '--profile')
+            profile=true
             ;;
         '')
             break
