@@ -20,6 +20,7 @@ cmd_executor *cmd_executor_new() {
   executor->vars = g_hash_table_new(g_str_hash, g_str_equal);
   executor->stdin_fno = STDIN_FILENO;
   executor->stdout_fno = STDOUT_FILENO;
+  executor->pg_id = 0;
 
   return executor;
 }
@@ -230,6 +231,10 @@ int cmd_executor_exec_term(cmd_executor *executor, char *term, char **argv) {
 
   pid_t pid;
   if ((pid = fork()) == 0) {
+    if (executor->pg_id != 0) {
+      setpgid(0, executor->pg_id);
+    }
+
     if (executor->stdin_fno != STDIN_FILENO) {
       close(STDIN_FILENO);
       dup(executor->stdin_fno);
@@ -314,8 +319,12 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
         giveup("cmd_executor_exec: pipe failed");
       }
 
-      // Have the executor write to output of the pipe.
+      // Have the executor write to write end of the pipe.
       executor->stdout_fno = pipe_fnos[1];
+
+      if (executor->pg_id == 0) {
+        executor->pg_id = getpid();
+      }
 
       // Execute the cmd we built.
       if ((status = cmd_executor_exec_term(
@@ -325,6 +334,8 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
 
         executor->stdin_fno = original_fnos[0];
         executor->stdout_fno = original_fnos[1];
+
+        executor->pg_id = 0;
 
         return status;
       }
@@ -345,6 +356,9 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
 
       // Reset the executor stdin.
       executor->stdin_fno = original_fnos[0];
+
+      // Reset the set pg_id of the executor.
+      executor->pg_id = 0;
 
       return status;
     }
