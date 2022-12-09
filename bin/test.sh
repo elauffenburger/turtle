@@ -10,12 +10,15 @@ t() {
     name=$1
     shift
 
-    expected_with_time=$(/usr/bin/env bash -c "time /usr/bin/env bash -c '$*'" 2>&1)
+    temp_file=$(mktemp)
+    echo "$*" > $temp_file
+
+    expected_with_time=$(/usr/bin/env bash -c "time /usr/bin/env bash <(cat $temp_file)" 2>&1)
     expected=$(head -n -3 <<<"$expected_with_time")
     expected_time=$(tail -n -3 <<<"$expected_with_time" | tr '\n' ' ')
     expected_exit_code="$?"
 
-    actual_with_time=$(/usr/bin/env bash -c "time ./build/turtle -c '$*'" 2>&1)
+    actual_with_time=$(/usr/bin/env bash -c "time ./build/turtle <(cat $temp_file)" 2>&1)
     actual=$(head -n -3 <<<"$actual_with_time")
     actual_time=$(tail -n -3 <<<"$actual_with_time" | tr '\n' ' ')
     actual_exit_code="$?"
