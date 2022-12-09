@@ -35,6 +35,7 @@ main() {
 
     # Add warnings
     flags+=(
+        -Werror
         -Wextra
         -Wall
         -Wfloat-equal
@@ -52,6 +53,8 @@ main() {
         -Wconversion
         -Wunreachable-code
         -Wno-incompatible-pointer-types-discards-qualifiers
+
+        -Wno-error=switch-enum
     )
 
     # Add optimmizations
