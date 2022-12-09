@@ -4,12 +4,13 @@
 #include <stdbool.h>
 
 typedef struct cmd {
+  // GList<cmd_part*>
   GList *parts;
   GHashTable *env_vars;
 } cmd;
 
 typedef struct cmd_word {
-  // GList<cmd_word_part*>;
+  // GList<cmd_word_part*>
   GList *parts;
 } cmd_word;
 
@@ -33,6 +34,8 @@ typedef struct cmd_word_part_str_part {
 
 typedef struct cmd_word_part_str {
   bool quoted;
+
+  // GList<cmd_word_part_str_part>
   GList *parts;
 } cmd_word_part_str;
 
@@ -91,5 +94,3 @@ cmd *cmd_new(void);
 cmd_word *cmd_word_new(cmd_word_part *parts);
 
 void cmd_free(cmd *cmd);
-
-void cmd_set_var(cmd *cmd, cmd_var_assign *var);
