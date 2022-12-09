@@ -63,12 +63,14 @@ int main(int argc, char **argv) {
     while ((fgets(line, sizeof(line), script_file)) != NULL) {
       cmd_parser_set_next(parser, line);
 
-      cmd *cmd = cmd_parser_parse_next(parser);
-      if ((status = cmd_executor_exec(executor, cmd)) != 0) {
-        return status;
-      }
+      cmd *cmd;
+      while ((cmd = cmd_parser_parse_next(parser)) != NULL) {
+        if ((status = cmd_executor_exec(executor, cmd)) != 0) {
+          return status;
+        }
 
-      cmd_free(cmd);
+        cmd_free(cmd);
+      }
     }
 
     exit(0);
