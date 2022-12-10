@@ -11,6 +11,7 @@ typedef struct cmd_executor {
   int stdout_fno;
 
   pid_t pg_id;
+  pid_t last_pid;
 
   jmp_buf err_jmp;
 } cmd_executor;

@@ -259,6 +259,8 @@ int cmd_executor_exec_term(cmd_executor *executor, char *term, char **argv) {
     exit(1);
   }
 
+  executor->last_pid = pid;
+
   int status;
   if ((pid = waitpid(pid, &status, 0)) < 0) {
     giveup("cmd_executor_exec_term: waitpid failed with pid=%d,status=%d", pid,
