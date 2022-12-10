@@ -8,8 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c,
-                                      cmd_word *word);
+static char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word);
 
 static void cmd_executor_error(cmd_executor *executor, int status) {
   longjmp(executor->err_jmp, status);
@@ -21,38 +20,47 @@ cmd_executor *cmd_executor_new() {
   executor->stdin_fno = STDIN_FILENO;
   executor->stdout_fno = STDOUT_FILENO;
   executor->pg_id = 0;
+  executor->last_pid = 0;
 
   return executor;
 }
 
-static char *cmd_executor_get_var(cmd_executor *executor,
-                                  cmd_word_part_var *var) {
-  // Check if we have a var def for the command.
-  char *var_val = g_hash_table_lookup(executor->vars, var->name->str);
-  if (var_val != NULL) {
-    return var_val;
+static GString *cmd_executor_get_var(cmd_executor *executor, char *name) {
+  // Check if this is a special var name.
+  if (strncmp(name, "!", 1) == 0) {
+    GString *result = g_string_new(NULL);
+    g_string_printf(result, "%d", executor->last_pid);
+    return result;
   }
 
-  // Fallback to the environment.
-  return getenv(var->name->str);
+  // Check if we have a var def for the command.
+  char *value = g_hash_table_lookup(executor->vars, name);
+  if (value == NULL) {
+    // Fallback to the environment.
+    value = getenv(name);
+  }
+
+  if (value == NULL) {
+    return NULL;
+  }
+
+  GString *result = g_string_new(NULL);
+  g_string_printf(result, "%s", value);
+  return result;
 }
 
-static void set_var(cmd_executor *executor, cmd *c, cmd_var_assign *var,
-                    GHashTable *vars) {
-  char *value = cmd_executor_word_to_str(executor, c, var->value);
-
+static void set_var(GHashTable *vars, char *name, char *value) {
   // Copy the name and value so they don't reference memory owned by the
   // cmd (which will be freed later).
-  char *name_cpy = malloc((strlen(var->name) + 1) * sizeof(char));
+  char *name_cpy = malloc((strlen(name) + 1) * sizeof(char));
   char *value_cpy = malloc((strlen(value) + 1) * sizeof(char));
-  strcpy(name_cpy, var->name);
+  strcpy(name_cpy, name);
   strcpy(value_cpy, value);
 
   g_hash_table_insert(vars, name_cpy, value_cpy);
 }
 
-static char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c,
-                                      cmd_word *word) {
+static char *cmd_executor_word_to_str(cmd_executor *executor, cmd_word *word) {
   GString *res = g_string_new(NULL);
 
   for (GList *node = word->parts; node != NULL; node = node->next) {
@@ -78,9 +86,10 @@ static char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c,
           }
 
           case CMD_WORD_PART_STR_PART_TYPE_VAR: {
-            char *val = cmd_executor_get_var(executor, str_part->value.var);
+            GString *val =
+                cmd_executor_get_var(executor, str_part->value.var->name->str);
             if (val != NULL) {
-              res = g_string_append(res, val);
+              res = g_string_append(res, g_string_free(val, false));
             }
 
             break;
@@ -114,9 +123,9 @@ static char *cmd_executor_word_to_str(cmd_executor *executor, cmd *c,
     }
 
     case CMD_WORD_PART_TYPE_VAR: {
-      char *val = cmd_executor_get_var(executor, part->value.var);
+      GString *val = cmd_executor_get_var(executor, part->value.var->name->str);
       if (val != NULL) {
-        res = g_string_append(res, val);
+        res = g_string_append(res, g_string_free(val, false));
       }
 
       break;
@@ -278,21 +287,24 @@ int cmd_executor_exec(cmd_executor *executor, cmd *cmd) {
     case CMD_PART_TYPE_VAR_ASSIGN: {
       cmd_var_assign *var = part->value.var_assign;
 
+      char *name = var->name;
+      char *value = cmd_executor_word_to_str(executor, var->value);
+
       // If this is the only part of the command, set the var as an executor
       // var.
       if (node->next == NULL) {
-        set_var(executor, cmd, var, executor->vars);
+        set_var(executor->vars, name, value);
       }
       // Otherwise, set it as a var for the environment for the command.
       else {
-        set_var(executor, cmd, var, cmd->env_vars);
+        set_var(cmd->env_vars, name, value);
       }
 
       break;
     }
 
     case CMD_PART_TYPE_WORD: {
-      char *word = cmd_executor_word_to_str(executor, cmd, part->value.word);
+      char *word = cmd_executor_word_to_str(executor, part->value.word);
       if (term == NULL) {
         argc++;
 
