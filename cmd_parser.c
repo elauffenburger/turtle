@@ -59,19 +59,26 @@ static void cmd_parser_err(cmd_parser *parser, char *fmt, ...) {
 // (e.g. "$var" will be returned and the cursor will be at "/" in "$var/baz").
 cmd_word_part_var *cmd_parser_parse_var_expand(cmd_parser *parser) {
   parser->next++;
+  char c = *parser->next;
 
   cmd_word_part_var *var = malloc(sizeof(cmd_word_part_var));
   var->name = g_string_new(NULL);
 
-  while (*parser->next != 0) {
-    char c = *parser->next;
+  // Check for special var names.
+  if (c == '!' || c == '?') {
+    var->name = g_string_append_c(var->name, c);
+    parser->next++;
+    return var;
+  }
 
-    if (is_var_name_char(c)) {
-      var->name = g_string_append_c(var->name, c);
-    } else {
+  while (c != 0) {
+    c = *parser->next;
+
+    if (!is_var_name_char(c)) {
       break;
     }
 
+    var->name = g_string_append_c(var->name, c);
     parser->next++;
   }
 
