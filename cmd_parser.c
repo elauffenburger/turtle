@@ -323,7 +323,7 @@ cmd_parser *cmd_parser_new() {
   return parser;
 }
 
-void cmd_parser_set_next(cmd_parser* parser, char* next) {
+void cmd_parser_set_next(cmd_parser *parser, char *next) {
   parser->in_sub = false;
   parser->next = next;
 }

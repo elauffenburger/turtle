@@ -8,7 +8,7 @@ typedef struct cmd_parser {
   bool in_sub;
 } cmd_parser;
 
-cmd_parser *cmd_parser_new();
+cmd_parser *cmd_parser_new(void);
 
 void cmd_parser_set_next(cmd_parser* parser, char* next);
 
