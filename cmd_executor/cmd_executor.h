@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cmd.h"
+#include "../cmd.h"
 #include "glib.h"
 #include <setjmp.h>
 

@@ -61,13 +61,18 @@ main() {
     optimizations=()
     if [[ "$debug" == 'true' ]]; then
         flags+=(-g -fsanitize=address)
-        
+
         export ASAN_OPTIONS=detect_leaks=1
     else
         flags+=(-O2)
     fi
 
-    clang *.c \
+    srcs=(
+        *.c
+        cmd_executor/*.c
+    )
+
+    clang "${srcs[@]}" \
         "${flags[@]}" \
         $(pkg-config --cflags --libs glib-2.0 readline) \
         -o ./build/turtle

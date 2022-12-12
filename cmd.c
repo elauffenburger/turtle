@@ -1,5 +1,5 @@
 #include "cmd.h"
-#include "cmd_executor.h"
+#include "cmd_executor/cmd_executor.h"
 #include "glib.h"
 #include "utils.h"
 #include <stdbool.h>
