@@ -1,17 +1,17 @@
-#include "cmd_executor.h"
+#include "./cmd_executor.h"
 #include "../cmd.h"
 #include "../cmd_parser.h"
 #include "../utils.h"
-#include "errors.h"
-#include "strings.h"
-#include "vars.h"
+#include "./errors.h"
+#include "./strings.h"
+#include "./vars.h"
 #include <fcntl.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-cmd_executor *cmd_executor_new() {
+cmd_executor *cmd_executor_new(void) {
   cmd_executor *executor = malloc(sizeof(cmd_executor));
   executor->vars = g_hash_table_new(g_str_hash, g_str_equal);
   executor->stdin_fno = STDIN_FILENO;

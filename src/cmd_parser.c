@@ -323,7 +323,7 @@ cmd_word *cmd_parser_parse_word(cmd_parser *parser) {
   return word;
 }
 
-cmd_parser *cmd_parser_new() {
+cmd_parser *cmd_parser_new(void) {
   cmd_parser *parser = malloc(sizeof(cmd_parser));
   parser->in_sub = false;
 
