@@ -1,2 +1,4 @@
 build
 *.profraw
+zig-cache
+zig-out
