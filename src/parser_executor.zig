@@ -35,9 +35,10 @@ pub const ParserExecutor = struct {
 
     pub fn parse_exec(self: *ParserExecutor, line: []u8) !u8 {
         const c_line = try toCString(self.allocator, line);
-        if (c_line.allocd) |allocd| {
-            // defer self.allocator.free(allocd);
-            _ = allocd;
+        defer {
+            if (c_line.allocd) |allocd| {
+                self.allocator.free(allocd);
+            }
         }
 
         c.cmd_parser_set_next(self.parser, c_line.str);
