@@ -1,11 +1,11 @@
 const std = @import("std");
 const mem = std.mem;
+const os = std.os;
+
+const Args = @import("args.zig").Args;
+const ParserExecutor = @import("parser_executor.zig").ParserExecutor;
 
 const c = @cImport({
-    @cInclude("cmd.h");
-    @cInclude("cmd_executor/cmd_executor.h");
-    @cInclude("cmd_parser.h");
-
     @cInclude("stdio.h");
 
     @cInclude("readline/history.h");
@@ -13,9 +13,29 @@ const c = @cImport({
 });
 
 pub fn main() void {
-    var parser = c.cmd_parser_new();
-    var executor = c.cmd_executor_new();
+    emain() catch {
+        os.exit(1);
+    };
+}
 
+fn emain() !void {
+    var allocator = std.heap.page_allocator;
+    var parser_executor = try ParserExecutor.init(&allocator) ;
+
+    const args = try Args.parse(&allocator); 
+
+    if (args.cmd_str) |cmd_str| {
+        const status = try parser_executor.parse_exec(cmd_str);
+
+        if (status != 0) {
+            std.os.exit(status);
+        }
+    }
+
+    try interactive(parser_executor);
+}
+
+fn interactive(parser_executor: *ParserExecutor) !void {
     var line: ?[*:0]u8 = null;
     while (true) {
         if (line != null) {
@@ -31,21 +51,9 @@ pub fn main() void {
             }
         }
 
-        c.cmd_parser_set_next(parser, line);
-
-        var cmd: ?*c.cmd = null;
-        while (true) {
-            cmd = c.cmd_parser_parse_next(parser);
-            if (cmd == null) {
-                break;
-            }
-
-            const status = c.cmd_executor_exec(executor, cmd);
-            if (status != 0) {
-                std.os.exit(@intCast(u8, status));
-            }
-
-            c.cmd_free(cmd);
+        const status = try parser_executor.parse_exec(mem.span(line.?));
+        if (status != 0) {
+            std.os.exit(status);
         }
     }
 }
