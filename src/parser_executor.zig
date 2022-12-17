@@ -8,7 +8,7 @@ const c = @cImport({
 });
 
 fn toCString(allocator: *mem.Allocator, str: []u8) !struct { allocd: ?[]u8, str: [*:0]u8 } {
-    if (str[str.len - 1] == 0) {
+    if (str.len > 0 and str[str.len - 1] == 0) {
         return .{ .allocd = null, .str = @ptrCast([*:0]u8, str.ptr) };
     }
 
@@ -36,7 +36,8 @@ pub const ParserExecutor = struct {
     pub fn parse_exec(self: *ParserExecutor, line: []u8) !u8 {
         const c_line = try toCString(self.allocator, line);
         if (c_line.allocd) |allocd| {
-            defer self.allocator.free(allocd);
+            // defer self.allocator.free(allocd);
+            _ = allocd;
         }
 
         c.cmd_parser_set_next(self.parser, c_line.str);
@@ -48,9 +49,9 @@ pub const ParserExecutor = struct {
                 break;
             }
 
-            const status = c.cmd_executor_exec(self.executor, cmd);
+            const status: c_int = c.cmd_executor_exec(self.executor, cmd);
             if (status != 0) {
-                return @intCast(u8, status);
+                return @intCast(u8, if (status > 255) 255 else status);
             }
 
             c.cmd_free(cmd);

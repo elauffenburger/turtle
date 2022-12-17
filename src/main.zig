@@ -1,4 +1,5 @@
 const std = @import("std");
+const debug = std.debug;
 const mem = std.mem;
 const os = std.os;
 
@@ -20,16 +21,32 @@ pub fn main() void {
 
 fn emain() !void {
     var allocator = std.heap.page_allocator;
-    var parser_executor = try ParserExecutor.init(&allocator) ;
+    var parser_executor = try ParserExecutor.init(&allocator);
 
-    const args = try Args.parse(&allocator); 
+    const args = try Args.parse(&allocator);
+
+    if (args.filename) |filename| {
+        var file_line_iter = std.mem.split(u8, try std.fs.cwd().readFileAlloc(allocator, filename, 1000000000000), "\n");
+        while (file_line_iter.next()) |line| {
+            var line_copy = try allocator.alloc(u8, line.len);
+            mem.copy(u8, line_copy, line);
+
+            const status = try parser_executor.parse_exec(line_copy);
+            if (status != 0) {
+                std.os.exit(status);
+            }
+        }
+
+        return;
+    }
 
     if (args.cmd_str) |cmd_str| {
         const status = try parser_executor.parse_exec(cmd_str);
-
         if (status != 0) {
             std.os.exit(status);
         }
+
+        return;
     }
 
     try interactive(parser_executor);

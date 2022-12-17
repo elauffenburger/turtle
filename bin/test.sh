@@ -99,6 +99,8 @@ main() {
             echo "$build_output"
             exit 1
         fi
+
+        echo "built"
     fi
 
     tests
