@@ -64,7 +64,7 @@ fn interactive(parser_executor: *ParserExecutor) !void {
         {
             const line_slice = mem.span(line.?);
             if (!mem.eql(u8, line_slice, "")) {
-                c.add_history(line.?);
+                _ = c.add_history(line.?);
             }
         }
 

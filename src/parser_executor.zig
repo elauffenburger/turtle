@@ -9,7 +9,7 @@ const c = @cImport({
 
 fn toCString(allocator: *mem.Allocator, str: []u8) !struct { allocd: ?[]u8, str: [*:0]u8 } {
     if (str.len > 0 and str[str.len - 1] == 0) {
-        return .{ .allocd = null, .str = @ptrCast([*:0]u8, str.ptr) };
+        return .{ .allocd = null, .str = @ptrCast(str.ptr) };
     }
 
     var buf = try allocator.allocSentinel(u8, str.len, 0);
@@ -52,7 +52,7 @@ pub const ParserExecutor = struct {
 
             const status: c_int = c.cmd_executor_exec(self.executor, cmd);
             if (status != 0) {
-                return @intCast(u8, if (status > 255) 255 else status);
+                return @intCast(if (status > 255) 255 else status);
             }
 
             c.cmd_free(cmd);

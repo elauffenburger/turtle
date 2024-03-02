@@ -35,17 +35,18 @@ const c_sources = [_][]const u8{
 
 pub fn build(b: *Builder) !void {
     const target = b.standardTargetOptions(.{});
-    const mode = b.standardReleaseOptions();
-
-    var turtle = b.addExecutable("turtle", "./src/main.zig");
-    turtle.setTarget(target);
-    turtle.setBuildMode(mode);
-    turtle.setOutputDir("./build");
+    const optimize = b.standardOptimizeOption(.{});
+    var turtle = b.addExecutable(.{
+        .name = "turtle",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
     turtle.linkSystemLibrary("glib-2.0");
     turtle.linkSystemLibrary("readline");
-    turtle.addIncludePath("./src");
+    turtle.addIncludePath(.{ .path = "src" });
     turtle.addCSourceFiles(&c_sources, &c_flags);
     turtle.linkLibC();
 
-    turtle.install();
+    b.installArtifact(turtle);
 }
