@@ -62,6 +62,9 @@ fn interactive(parser_executor: *ParserExecutor) !void {
 
         line = c.readline("🐢> ");
         {
+            if (line == null) {
+                break;
+            }
             const line_slice = mem.span(line.?);
             if (!mem.eql(u8, line_slice, "")) {
                 _ = c.add_history(line.?);
