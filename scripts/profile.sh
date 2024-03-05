@@ -1,59 +1,50 @@
 #!/usr/bin/env bash
-
-set -m
+set -eu -o pipefail
 
 usage() {
     echo "usage: $0 [--duration duration [samplingInterval]] [--file output-file]"
+    exit 1
 }
 
 main() {
-    duration=30
-    file='./build/perf.txt'
+    SAMPLE_DURATION_SEC=30
+    FILE='./build/perf.txt'
 
-    while :; do
+    while [[ "$#" -gt 0 ]]; do
         case "$!" in
         '--duration')
             shift
-            duration="$1"
-
-            break
+            SAMPLE_DURATION_SEC="$1"
             ;;
 
         '--help')
             usage
-            exit 0
             ;;
 
         '--file')
             shift
-            file="$1"
-
-            break
-            ;;
-
-        '')
-            break
+            FILE="$1"
             ;;
 
         *)
+            echo "unknown flag $1"
             usage
-            exit 1
             ;;
         esac
 
         shift
-
     done
 
     ./bin/build.sh
 
     # Start turtle in the background.
     ./build/turtle &
-    turtle_pid="$!"
+    TURTLE_PID="$!"
 
     # Start sampling in the background.
-    sample "$turtle_pid" "$duration" -f "$file" 2>/dev/null &
-    sample_pid="$!"
+    sample "$TURTLE_PID" "$SAMPLE_DURATION_SEC" -f "$FILE" 2>/dev/null &
+    SAMPLE_PID="$!"
+    trap 'kill $SAMPLE_PID' EXIT
 
     # Bring turtle to the foreground.
     fg %1 >/dev/null

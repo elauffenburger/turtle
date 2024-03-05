@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 
-profile=false
+profile=
 
 usage() {
     echo "usage: $0 [--no-build]"
+    exit 1
 }
 
 t() {
@@ -11,7 +12,7 @@ t() {
     shift
 
     temp_file=$(mktemp)
-    echo "$*" > $temp_file
+    echo "$*" >$temp_file
 
     expected_with_time=$(/usr/bin/env bash -c "time /usr/bin/env bash <(cat $temp_file)" 2>&1)
     expected=$(head -n -3 <<<"$expected_with_time")
@@ -32,7 +33,7 @@ t() {
     if [[ "$outputs_match" == 'true' && "$status_codes_match" == 'true' ]]; then
         echo "- PASS: $name"
 
-        if [[ "$profile" == 'true' ]]; then
+        if [[ "$profile" == 1 ]]; then
             echo "  - expected time: $expected_time"
             echo "  - actual time  : $actual_time"
         fi
@@ -70,27 +71,25 @@ tests() {
 
 main() {
     skip_build=
-    while :; do
+    while [[ "$#" -gt 0 ]]; do
         case $1 in
         '--no-build')
-            skip_build=true
+            skip_build=1
             ;;
+
         '--profile')
-            profile=true
-            ;;
-        '')
-            break
+            profile=1
             ;;
         *)
+            echo "unknown flag $1"
             usage
-            exit 1
             ;;
         esac
 
         shift
     done
 
-    if [[ "$skip_build" != 'true' ]]; then
+    if [[ "$skip_build" != 1 ]]; then
         # Build turtle.
         echo "building..."
         build_output=$(./bin/build.sh 2>&1)
