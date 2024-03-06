@@ -11,16 +11,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-cmd_executor *cmd_executor_new(void) {
-  cmd_executor *executor = malloc(sizeof(cmd_executor));
-  executor->vars = g_hash_table_new(g_str_hash, g_str_equal);
-  executor->stdin_fno = STDIN_FILENO;
-  executor->stdout_fno = STDOUT_FILENO;
-  executor->pg_id = 0;
-  executor->last_pid = 0;
+// cmd_executor *cmd_executor_new(void) {
+//   cmd_executor *executor = malloc(sizeof(cmd_executor));
+//   executor->vars = g_hash_table_new(g_str_hash, g_str_equal);
+//   executor->stdin_fno = STDIN_FILENO;
+//   executor->stdout_fno = STDOUT_FILENO;
+//   executor->pg_id = 0;
+//   executor->last_pid = 0;
 
-  return executor;
-}
+//   return executor;
+// }
 
 int cmd_executor_exec_term(cmd_executor *executor, char *term, char **argv) {
   if (strcmp(term, ".") == 0) {

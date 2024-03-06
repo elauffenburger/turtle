@@ -8,6 +8,7 @@ const ParserExecutor = @import("parser_executor.zig").ParserExecutor;
 
 const c = @cImport({
     @cInclude("stdio.h");
+    @cInclude("signal.h");
 
     @cInclude("readline/history.h");
     @cInclude("readline/readline.h");
@@ -17,6 +18,10 @@ pub fn main() void {
     emain() catch {
         os.exit(1);
     };
+}
+
+fn onexit() void {
+    c.fputs("byte\n", std.c.stderr);
 }
 
 fn emain() !void {
@@ -71,7 +76,7 @@ fn interactive(parser_executor: *ParserExecutor) !void {
             }
         }
 
-        const status = try parser_executor.parse_exec(mem.span(line.?));
+        const status = try parser_executor.exec(mem.span(line.?));
         if (status != 0) {
             std.os.exit(status);
         }
