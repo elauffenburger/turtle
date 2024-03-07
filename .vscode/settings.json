@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "cmd_executor.h": "c"
+        "cmd_executor.h": "c",
+        "unistd.h": "c"
     }
 }

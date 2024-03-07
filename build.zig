@@ -23,16 +23,6 @@ const c_flags = [_][]const u8{
     "-Wno-error=switch-enum",
 };
 
-const c_sources = [_][]const u8{
-    "src/cmd_executor/cmd_executor.c",
-    "src/cmd_executor/errors.c",
-    "src/cmd_executor/strings.c",
-    "src/cmd_executor/vars.c",
-    "src/cmd_parser.c",
-    "src/cmd.c",
-    "src/utils.c",
-};
-
 pub fn build(b: *Builder) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -44,8 +34,6 @@ pub fn build(b: *Builder) !void {
     });
     turtle.linkSystemLibrary("glib-2.0");
     turtle.linkSystemLibrary("readline");
-    turtle.addIncludePath(.{ .path = "src" });
-    turtle.addCSourceFiles(&c_sources, &c_flags);
     turtle.linkLibC();
 
     b.installArtifact(turtle);
