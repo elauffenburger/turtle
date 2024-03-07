@@ -2,4 +2,4 @@
 set -eu -o pipefail
 
 . "$(dirname $0)/build.sh"
-"$(dirname $0)/../zig-out/bin/turtle"
+"$(dirname $0)/../zig-out/bin/turtle" "$@"

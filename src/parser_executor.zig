@@ -1,8 +1,8 @@
 const std = @import("std");
 const mem = std.mem;
 
-const CmdParser = @import("cmd_parser.zig").CmdParser;
-const CmdExecutor = @import("cmd_executor.zig").CmdExecutor;
+const cmd_parser = @import("cmd_parser.zig");
+const cmd_executor = @import("cmd_executor.zig");
 
 pub const ParserExecutor = struct {
     allocator: mem.Allocator,
@@ -12,18 +12,19 @@ pub const ParserExecutor = struct {
     }
 
     pub fn exec(self: ParserExecutor, line: []u8) !u8 {
+        var parser = cmd_parser.CmdParser.init(self.allocator, line);
+
+        var lastStatus: u8 = 0;
         while (true) {
-            var parser = CmdParser.init(self.allocator, line);
+            const cmd = parser.parse() catch |err| switch (err) {
+                cmd_parser.Error.OutOfInput => break,
+                else => return err,
+            };
 
-            const cmd = try parser.parse();
-
-            var executor = CmdExecutor.init(self.allocator);
-            const status = try executor.exec(cmd);
-            if (status != 0) {
-                return @intCast(if (status > 255) 255 else status);
-            }
+            var executor = cmd_executor.CmdExecutor.init(self.allocator);
+            lastStatus = try executor.exec(cmd);
         }
 
-        return 0;
+        return lastStatus;
     }
 };

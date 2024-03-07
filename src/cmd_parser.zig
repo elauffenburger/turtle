@@ -8,8 +8,9 @@ const VAR_ASSIGN = '=';
 const PIPE = '|';
 const COMMENT = '#';
 
-const Error = error{
+pub const Error = error{
     OutOfInput,
+    NotStarted,
 };
 
 pub const CmdParser = struct {
@@ -17,16 +18,18 @@ pub const CmdParser = struct {
 
     allocator: std.mem.Allocator,
 
-    bufOffset: usize,
+    buf_offset: usize,
     buf: []u8,
-    inSub: bool,
+    in_sub: bool,
+    started: bool,
 
     pub fn init(allocator: std.mem.Allocator, buf: []u8) Self {
         return .{
             .allocator = allocator,
-            .bufOffset = 0,
+            .buf_offset = 0,
             .buf = buf,
-            .inSub = false,
+            .in_sub = false,
+            .started = false,
         };
     }
 
@@ -77,7 +80,7 @@ pub const CmdParser = struct {
         var ch = try self.curr();
         while (true) {
             // Check if we're done with the current substitution (if any).
-            if (self.inSub and ch == ')') {
+            if (self.in_sub and ch == ')') {
                 break;
             }
 
@@ -92,7 +95,7 @@ pub const CmdParser = struct {
             }
 
             i += 1;
-            ch = try self.peek(i);
+            ch = self.peek(i) catch break;
         }
 
         return try self.take(i);
@@ -151,12 +154,12 @@ pub const CmdParser = struct {
         }
 
         // Create a new parser that will parse the subexpression using the current buffer position.
-        var subParser = Self.init(self.allocator, self.buf[self.bufOffset..]);
-        subParser.inSub = true;
+        var subParser = Self.init(self.allocator, self.buf[self.buf_offset..]);
+        subParser.in_sub = true;
         const sub = try subParser.parse();
 
         // Skip ahead however many characters the subexpression parsing consumed.
-        _ = try self.take(subParser.bufOffset);
+        _ = try self.take(subParser.buf_offset);
 
         return sub;
     }
@@ -186,6 +189,8 @@ pub const CmdParser = struct {
             } else {
                 self.onErr("parseStrQuoted: unexpected char: {s}", .{ch});
             }
+
+            ch = try self.curr();
         }
 
         return res;
@@ -226,7 +231,7 @@ pub const CmdParser = struct {
                 return word;
             }
 
-            if (ch == ' ' or ch == '\n' or ch == ';' or (self.inSub and ch == ')')) {
+            if (ch == ' ' or ch == '\n' or ch == ';' or (self.in_sub and ch == ')')) {
                 return word;
             }
 
@@ -267,6 +272,7 @@ pub const CmdParser = struct {
             };
 
             try word.parts.append(part);
+            ch = self.curr() catch break;
         }
 
         return word;
@@ -274,10 +280,6 @@ pub const CmdParser = struct {
 
     /// parse parses the init'd input and returns an executable cmd*.
     pub fn parse(self: *Self) anyerror!*cmd.Cmd {
-        if (self.buf.len == 0) {
-            return Error.OutOfInput;
-        }
-
         const res = try self.allocator.create(cmd.Cmd);
         res.* = cmd.Cmd.init(self.allocator);
 
@@ -285,17 +287,21 @@ pub const CmdParser = struct {
         var ch = try self.curr();
 
         while (true) {
+            if (isEndOfLine(ch)) {
+                break;
+            }
+
             while (ch == ' ') {
-                ch = try self.next();
+                ch = self.next() catch break;
             }
 
             if (ch == COMMENT) {
-                try self.consumeToEndOfLine();
-                return res;
+                self.consumeToEndOfLine() catch break;
+                break;
             }
 
-            if (ch == '\n' or ch == ';' or (self.inSub and ch == ')')) {
-                _ = try self.next();
+            if (ch == '\n' or ch == ';' or (self.in_sub and ch == ')')) {
+                _ = self.next() catch break;
                 return res;
             }
 
@@ -304,8 +310,8 @@ pub const CmdParser = struct {
                 if (isLiteralChar(ch) or ch == STR_UNQUOTED or ch == STR_QUOTED or ch == VAR_EXPAND_START or ch == '<') {
                     var word = try self.parseWord();
 
-                    // Check if this is a var assignment
-                    if (canSetVars and word.parts.items.len == 1 and word.parts.items[0].literal.len > 0 and try self.curr() == '=') {
+                    // Check if this is a var assignment.
+                    if (canSetVars and word.parts.items.len == 1 and word.parts.items[0].literal.len > 0 and self.curr() catch ' ' == '=') {
                         _ = try self.next();
 
                         const varAssignment = try self.allocator.create(cmd.CmdVarAssign);
@@ -347,6 +353,8 @@ pub const CmdParser = struct {
                 self.onErr("parse: unexpected char {s}", .{ch});
                 unreachable;
             });
+
+            ch = self.curr() catch break;
         }
 
         return res;
@@ -360,18 +368,23 @@ pub const CmdParser = struct {
     }
 
     fn next(self: *Self) Error!u8 {
-        const taken = try self.take(1);
-        return taken[0];
+        self.buf_offset += 1;
+        return self.buf[self.buf_offset];
     }
 
-    fn take(self: *Self, offset: usize) Error![]u8 {
-        const newOffset = self.bufOffset + offset;
+    /// take consumes n many characters from the input buffer.
+    ///
+    /// Notes:
+    ///   - The result will contain the current character.
+    ///   - n will be clamped so that the returned slice never exceeds the length of the buffer.
+    fn take(self: *Self, n: usize) Error![]u8 {
+        var newOffset = self.buf_offset + n;
         if (newOffset >= self.buf.len) {
-            return Error.OutOfInput;
+            newOffset = self.buf.len;
         }
 
-        const result = self.buf[self.bufOffset..newOffset];
-        self.bufOffset = newOffset;
+        const result = self.buf[self.buf_offset..newOffset];
+        self.buf_offset = newOffset;
 
         return result;
     }
@@ -381,10 +394,10 @@ pub const CmdParser = struct {
     }
 
     fn peek(self: Self, offset: usize) Error!u8 {
-        const actualOffset = self.bufOffset + offset;
+        var effectiveOffset = self.buf_offset + offset;
 
-        if (actualOffset < self.buf.len) {
-            return self.buf[actualOffset];
+        if (effectiveOffset >= 0 and effectiveOffset < self.buf.len) {
+            return self.buf[effectiveOffset];
         } else {
             return Error.OutOfInput;
         }

@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(lldb) Debug Build",
+            "name": "(lldb) Debug Builder",
             "type": "cppdbg",
             "request": "launch",
             "program": "${input:detectedBuildProgramDir}",
@@ -20,7 +20,20 @@
             "environment": [],
             "externalConsole": false,
             "MIMode": "lldb"
-        }
+        },
+        {
+            "name": "(lldb) Launch",
+            "cwd": "${workspaceFolder}",
+            "type": "cppdbg",
+            "request": "launch",
+            "args": [
+                "-c",
+                "echo foo"
+            ],
+            "program": "${workspaceFolder}/zig-out/bin/turtle",
+            "MIMode": "lldb",
+            "preLaunchTask": "build"
+        },
     ],
     "inputs": [
         {
@@ -30,6 +43,6 @@
             "args": {
                 "command": "find ${workspaceFolder} -type file -name build | head -n 1"
             }
-        }
+        },
     ]
 }

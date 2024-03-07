@@ -37,13 +37,8 @@ pub const CmdExecutor = struct {
         };
     }
 
-    pub fn execTerm(self: *Self, term: []u8, args: [][]u8) !u8 {
-        if (std.mem.eql(u8, term, ".")) {
-            // TODO: bounds checking.
-            return self.execTerm(args[0], args[1..]);
-        }
-
-        var pid = c.fork();
+    pub fn forkExec(self: *Self, args: [][]u8) !u8 {
+        var pid = try std.os.fork();
         if (pid == 0) {
             if (self.stdin_fno != c.STDIN_FILENO) {
                 _ = c.close(c.STDIN_FILENO);
@@ -64,9 +59,9 @@ pub const CmdExecutor = struct {
                 var iter = self.vars.iterator();
                 var maybe_entry = iter.next();
                 while (maybe_entry != null) {
-                    // const entry = maybe_entry.?;
+                    const entry = maybe_entry.?;
 
-                    // try res.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* }));
+                    try res.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* }));
                 }
 
                 break :blk try res.toOwnedSlice();
@@ -77,27 +72,26 @@ pub const CmdExecutor = struct {
             // defer envp.deinit();
 
             // Finally run this thing.
-            const term_cstr = try self.allocator.dupeZ(u8, term);
-            const err = std.os.execvpeZ(term_cstr.ptr, argv.vec.ptr, envp.vec.ptr);
+            const err = std.os.execvpeZ(argv.vec[0].?, argv.vec.ptr, envp.vec.ptr);
 
             // If we got here, that means the exec failed!
-            self.giveup("execTerm: exec {s} failed: {any}", .{ term, err });
+            self.giveup("execTerm: exec {s} failed: {any}", .{ args[0], err });
         }
 
+        // Record the child process' pid as the last_pid.
         self.last_pid = pid;
 
-        var status: c_int = 0;
-        pid = c.waitpid(pid, &status, 0);
-        if (pid < 0) {
-            self.giveup("execTerm: waitpid failed with pid={d},status={d}", .{ pid, status });
-        }
+        // Wait for the child to finish.
+        const res = std.os.waitpid(pid, 0);
 
-        return @intCast(status);
+        // HACK: looks like there's some kind of result code mangling on Mac OS at least
+        // that shifts the num 8 bits to the right, so let's undo that...
+        const status: u8 = @intCast(res.status >> 8);
+
+        return status;
     }
 
     pub fn exec(self: *Self, command: *cmd.Cmd) anyerror!u8 {
-        var term: ?[]u8 = null;
-
         var args = std.ArrayList([]u8).init(self.allocator);
 
         // Set up executor err jump.
@@ -134,7 +128,7 @@ pub const CmdExecutor = struct {
                     self.stdout_fno = pipe_fnos[1];
 
                     // Execute the left side.
-                    const left_status = try self.execTerm(term.?, args.items);
+                    const left_status = try self.forkExec(args.items);
                     if (left_status != 0) {
                         _ = c.close(pipe_fnos[0]);
                         _ = c.close(pipe_fnos[1]);
@@ -160,7 +154,7 @@ pub const CmdExecutor = struct {
                 },
 
                 .orCmd => |orCmd| {
-                    const left_status = try self.execTerm(term.?, args.items);
+                    const left_status = try self.forkExec(args.items);
 
                     // If the left side succeeded, we're done!
                     if (left_status == 0) {
@@ -172,7 +166,7 @@ pub const CmdExecutor = struct {
                 },
 
                 .andCmd => |andCmd| {
-                    const left_status = try self.execTerm(term.?, args.items);
+                    const left_status = try self.forkExec(args.items);
 
                     // If the left side failed, bail!
                     if (left_status == 0) {
@@ -185,11 +179,11 @@ pub const CmdExecutor = struct {
             }
         }
 
-        if (term == null) {
+        if (args.items.len == 0) {
             return 0;
         }
 
-        return try self.execTerm(term.?, args.items);
+        return try self.forkExec(args.items);
     }
 
     fn wordToStr(self: *Self, word: *cmd.CmdWord) anyerror![]u8 {
@@ -357,12 +351,12 @@ pub const CmdExecutor = struct {
         return value;
     }
 
-    fn giveup(_: Self, comptime _: []const u8, _: anytype) void {
-        // std.log.err(fmt, args);
+    fn giveup(_: Self, comptime fmt: []const u8, args: anytype) void {
+        std.debug.print(fmt, args);
         std.os.exit(1);
     }
 
-    fn exitErr(self: *Self, status: c_int) Error!void {
+    fn exitErr(self: *Self, status: u32) Error!void {
         self.exit_status_code = @intCast(status);
     }
 
@@ -378,8 +372,8 @@ pub const CmdExecutor = struct {
             for (slice, 0..) |subSlice, i| {
                 const cArg = try allocator.dupeZ(u8, subSlice);
 
+                res[i] = cArg;
                 vec_item_slices[i] = cArg;
-                res[i] = cArg.ptr;
             }
 
             return .{

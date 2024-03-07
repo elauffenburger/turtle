@@ -28,6 +28,8 @@ fn emain() !void {
     var allocator = std.heap.page_allocator;
     var parser_executor = ParserExecutor.init(allocator);
 
+    // try testfork();
+
     const args = try Args.parse(&allocator);
 
     if (args.filename) |filename| {
@@ -81,4 +83,29 @@ fn interactive(parser_executor: *ParserExecutor) !void {
             std.os.exit(status);
         }
     }
+}
+
+fn testfork() !void {
+    var allocator = std.heap.page_allocator;
+
+    const pid = try os.fork();
+    if (pid == 0) {
+        std.debug.print("hi from child!\n", .{});
+
+        const prog = try std.fmt.allocPrintZ(allocator, "echo", .{});
+
+        const argv = try allocator.allocSentinel(?[*:0]const u8, 2, null);
+        argv[0] = try std.fmt.allocPrintZ(allocator, "echo", .{});
+        argv[1] = try std.fmt.allocPrintZ(allocator, "foo", .{});
+
+        const envp = try allocator.allocSentinel(?[*:0]const u8, 0, null);
+
+        std.os.execvpeZ(prog.ptr, argv.ptr, envp.ptr) catch {};
+
+        os.exit(0);
+    }
+
+    const res = os.waitpid(pid, 0);
+    std.debug.print("child exited with: {any}\n", .{res.status});
+    std.os.exit(@intCast(res.status));
 }

@@ -21,6 +21,7 @@ pub const Args = struct {
             if (mem.eql(u8, arg, "-c")) {
                 if (args_iter.next()) |next| {
                     args.cmd_str = try allocator.dupe(u8, next);
+                    continue;
                 } else {
                     unreachable;
                 }
