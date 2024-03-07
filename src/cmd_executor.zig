@@ -5,51 +5,83 @@ const c = @cImport({
     @cInclude("fcntl.h");
     @cInclude("setjmp.h");
     @cInclude("stdio.h");
+    @cInclude("string.h");
     @cInclude("sys/stat.h");
+    @cInclude("sys/wait.h");
     @cInclude("unistd.h");
 });
+
+const Error = error{
+    CmdExit,
+};
 
 pub const CmdExecutor = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    vars: std.AutoHashMap([]u8, []u8),
+    vars: std.StringHashMap([]u8),
     stdin_fno: c_int,
     stdout_fno: c_int,
-    last_pid: c_int,
-    err_jump: c.jmp_buf,
+    last_pid: ?c_int,
+
+    exit_status_code: ?u8,
 
     pub fn init(allocator: std.mem.Allocator) Self {
-        .{
+        return .{
             .allocator = allocator,
-            .vars = std.AutoHashMap([]u8, []u8).init(allocator),
+            .vars = std.StringHashMap([]u8).init(allocator),
             .stdin_fno = c.STDIN_FILENO,
-            .stdout_fn = c.STDOUT_FILENO,
+            .stdout_fno = c.STDOUT_FILENO,
+            .last_pid = null,
+            .exit_status_code = null,
         };
     }
 
-    pub fn execTerm(self: *Self, term: []u8, argv: [][]u8) !u8 {
-        if (std.mem.equal(term, ".")) {
+    pub fn execTerm(self: *Self, term: []u8, args: [][]u8) !u8 {
+        if (std.mem.eql(u8, term, ".")) {
             // TODO: bounds checking.
-            return self.execTerm(argv[0], argv[1..]);
+            return self.execTerm(args[0], args[1..]);
         }
 
         var pid = c.fork();
         if (pid == 0) {
             if (self.stdin_fno != c.STDIN_FILENO) {
-                c.close(c.STDIN_FILENO);
-                c.dup(self.stdin_fno);
+                _ = c.close(c.STDIN_FILENO);
+                _ = c.dup(self.stdin_fno);
             }
 
             if (self.stdout_fno != c.STDOUT_FILENO) {
-                c.close(c.STDOUT_FILENO);
-                c.dup(self.stdout_fno);
+                _ = c.close(c.STDOUT_FILENO);
+                _ = c.dup(self.stdout_fno);
             }
 
-            c.execvp(term.ptr, argv.ptr);
+            const argv = try CStringVecHandle.fromSlice(self.allocator, args);
+            // defer argv.deinit();
+
+            const env_pairs = blk: {
+                var res = std.ArrayList([]u8).init(self.allocator);
+
+                var iter = self.vars.iterator();
+                var maybe_entry = iter.next();
+                while (maybe_entry != null) {
+                    // const entry = maybe_entry.?;
+
+                    // try res.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* }));
+                }
+
+                break :blk try res.toOwnedSlice();
+            };
+            // defer self.allocator.free(env_pairs);
+
+            const envp = try CStringVecHandle.fromSlice(self.allocator, env_pairs);
+            // defer envp.deinit();
+
+            // Finally run this thing.
+            const term_cstr = try self.allocator.dupeZ(u8, term);
+            const err = std.os.execvpeZ(term_cstr.ptr, argv.vec.ptr, envp.vec.ptr);
 
             // If we got here, that means the exec failed!
-            self.giveup("execTerm: exec {} failed", .{term});
+            self.giveup("execTerm: exec {s} failed: {any}", .{ term, err });
         }
 
         self.last_pid = pid;
@@ -57,23 +89,18 @@ pub const CmdExecutor = struct {
         var status: c_int = 0;
         pid = c.waitpid(pid, &status, 0);
         if (pid < 0) {
-            self.giveup("execTerm: waitpid failed with pid={},status={}", .{ pid, status });
+            self.giveup("execTerm: waitpid failed with pid={d},status={d}", .{ pid, status });
         }
 
         return @intCast(status);
     }
 
-    pub fn exec(self: *Self, command: *cmd.Cmd) !u8 {
+    pub fn exec(self: *Self, command: *cmd.Cmd) anyerror!u8 {
         var term: ?[]u8 = null;
 
         var args = std.ArrayList([]u8).init(self.allocator);
 
         // Set up executor err jump.
-        var err_status = c.setjmp(self.err_jump);
-        if (err_status != 0) {
-            return err_status;
-        }
-
         for (command.parts.items, 0..) |part, i| {
             switch (part) {
                 .varAssign => |varAssign| {
@@ -83,43 +110,34 @@ pub const CmdExecutor = struct {
                     // If this is the only part of the command, set the var as an executor
                     // var.
                     if (i == command.parts.items.len - 1) {
-                        self.vars.put(name, value);
+                        try self.vars.put(name, value);
                     }
                     // Otherwise, set it as a var for the environment for the command.
                     else {
-                        command.env_vars.put(name, value);
+                        try command.env_vars.put(name, value);
                     }
                 },
 
                 .word => |word| {
-                    const wordStr = try self.wordToString(word);
-                    if (term == null) {
-                        term = wordStr;
-                    }
-
-                    args.append(wordStr);
+                    try args.append(try self.wordToStr(word));
                 },
 
                 .pipedCmd => |pipedCmd| {
                     const original_fnos = [_]c_int{ self.stdin_fno, self.stdout_fno };
 
-                    const pipe_fnos = [2]c_int{};
-                    if (c.pipe(pipe_fnos) < 0) {
+                    var pipe_fnos = [2]c_int{ 0, 0 };
+                    if (c.pipe(pipe_fnos[0..].ptr) < 0) {
                         self.giveup("exec: pipe failed", .{});
                     }
-
-                    // Build argv.
-                    const argv = try ArgvHandle.fromSlice(self.allocator, args.items);
-                    defer argv.deinit();
 
                     // Write to the write end of the pipe.
                     self.stdout_fno = pipe_fnos[1];
 
                     // Execute the left side.
-                    const left_status = try self.execTerm(term, argv);
+                    const left_status = try self.execTerm(term.?, args.items);
                     if (left_status != 0) {
-                        c.close(pipe_fnos[0]);
-                        c.close(pipe_fnos[1]);
+                        _ = c.close(pipe_fnos[0]);
+                        _ = c.close(pipe_fnos[1]);
 
                         self.stdin_fno = original_fnos[0];
                         self.stdout_fno = original_fnos[1];
@@ -128,7 +146,7 @@ pub const CmdExecutor = struct {
                     }
 
                     // Close the write end of the pipe (we're done writing), restore the output fno, and read from the read end.
-                    c.close(pipe_fnos[1]);
+                    _ = c.close(pipe_fnos[1]);
                     self.stdout_fno = original_fnos[1];
                     self.stdin_fno = pipe_fnos[0];
 
@@ -142,10 +160,7 @@ pub const CmdExecutor = struct {
                 },
 
                 .orCmd => |orCmd| {
-                    const argv = try ArgvHandle.fromSlice(self.allocator, args.items);
-                    defer argv.deinit();
-
-                    const left_status = try self.exec_term(term, argv);
+                    const left_status = try self.execTerm(term.?, args.items);
 
                     // If the left side succeeded, we're done!
                     if (left_status == 0) {
@@ -157,10 +172,7 @@ pub const CmdExecutor = struct {
                 },
 
                 .andCmd => |andCmd| {
-                    const argv = try ArgvHandle.fromSlice(self.allocator, args.items);
-                    defer argv.deinit();
-
-                    const left_status = try self.exec_term(term, argv);
+                    const left_status = try self.execTerm(term.?, args.items);
 
                     // If the left side failed, bail!
                     if (left_status == 0) {
@@ -177,39 +189,36 @@ pub const CmdExecutor = struct {
             return 0;
         }
 
-        const argv = try ArgvHandle.fromSlice(self.allocator, args.items);
-        defer argv.deinit();
-
-        return try self.exec_term(term, argv.ptr);
+        return try self.execTerm(term.?, args.items);
     }
 
-    fn wordToStr(self: Self, word: *cmd.CmdWord) ![]u8 {
-        const res = std.ArrayList(u8).init(self.allocator);
+    fn wordToStr(self: *Self, word: *cmd.CmdWord) anyerror![]u8 {
+        var res = std.ArrayList(u8).init(self.allocator);
 
         for (word.parts.items) |part| {
-            switch (part) {
+            switch (part.*) {
                 .literal => |literal| {
                     try res.appendSlice(literal);
                 },
                 .str => |str| {
                     if (str.quoted) {
                         for (str.parts.items) |str_part| {
-                            switch (str_part) {
+                            switch (str_part.*) {
                                 .literal => |literal| {
                                     try res.appendSlice(literal);
                                 },
 
                                 .variable => |variable| {
-                                    const val = self.getVar(variable.name);
+                                    const val = try self.getVar(variable.name);
                                     if (val != null) {
-                                        res.appendSlice(val);
+                                        try res.appendSlice(val.?);
                                     }
                                 },
                             }
                         }
                     } else {
                         for (str.parts.items) |str_part| {
-                            switch (str_part) {
+                            switch (str_part.*) {
                                 .literal => |literal| {
                                     try res.appendSlice(literal);
                                 },
@@ -225,68 +234,72 @@ pub const CmdExecutor = struct {
                 .variable => |variable| {
                     const val = try self.getVar(variable.name);
                     if (val != null) {
-                        res.appendSlice(val);
+                        try res.appendSlice(val.?);
                     }
                 },
 
                 .cmd_sub => |cmd_sub| {
                     const original_fnos = [_]c_int{ self.stdin_fno, self.stdout_fno };
 
-                    const pipe_fnos = []c_int{0} ** 2;
-                    if (c.pipe(pipe_fnos) < 0) {
+                    var pipe_fnos = [2]c_int{ 0, 0 };
+                    if (c.pipe(&pipe_fnos) < 0) {
                         self.giveup("wordToStr: pipe failed", .{});
                     }
 
                     // Write to the write end of the pipe while executing the cmd.
                     self.stdout_fno = pipe_fnos[1];
-                    const status = self.exec(cmd_sub);
+                    const status = try self.exec(cmd_sub);
                     self.stdout_fno = original_fnos[1];
 
                     // Signal that we're done writing.
-                    c.close(pipe_fnos[1]);
+                    _ = c.close(pipe_fnos[1]);
 
                     // If the command failed, bail!
                     if (status != 0) {
-                        self.exitError(status);
+                        try self.exitErr(status);
                     }
 
                     // Read the result.
-                    const arg = blk: {
-                        const argRes = std.ArrayList(u8).init(self.allocator);
+                    var arg = blk: {
+                        var argRes = std.ArrayList(u8).init(self.allocator);
 
                         var buf = [_]u8{0} ** c.BUFSIZ;
 
-                        var n = c.read(pipe_fnos[0], buf.ptr);
+                        var n: usize = @intCast(c.read(pipe_fnos[0], &buf, buf.len));
                         while (n != 0) {
+                            var bufSlice: []u8 = buf[0..];
+
                             if (n < c.BUFSIZ) {
                                 // Remove the trailing newline.
-                                buf = buf[0..n];
-                                buf[n - 1] = 0;
+                                bufSlice = bufSlice[0..n];
+                                bufSlice[n - 1] = 0;
                             }
 
-                            argRes.appendSlice(buf);
+                            try argRes.appendSlice(bufSlice);
 
-                            n = c.read(pipe_fnos[0], buf.ptr);
+                            n = @intCast(c.read(pipe_fnos[0], &buf, buf.len));
                         }
 
                         break :blk argRes;
                     };
 
                     // Close the read end.
-                    c.close(pipe_fnos[0]);
+                    _ = c.close(pipe_fnos[0]);
 
-                    res.appendSlice(try arg.toOwnedSlice());
+                    try res.appendSlice(try arg.toOwnedSlice());
                 },
 
                 .proc_sub => |proc_sub| {
-                    const file_name = "/tmp/turtle-proc-XXXXXX";
+                    const file_name_template = "/tmp/turtle-proc-XXXXXX\x00";
+                    var file_name_buf: [file_name_template.len:0]u8 = undefined;
+                    std.mem.copyForwards(u8, &file_name_buf, file_name_template);
 
-                    var fd = c.mkstemp(file_name);
+                    var fd = c.mkstemp(file_name_buf[0..].ptr);
                     if (fd < 0) {
                         self.giveup("wordToStr: proc sub file creation failed", .{});
                     }
 
-                    if (c.chmod(file_name, 0o777) < 0) {
+                    if (c.chmod(file_name_buf[0..].ptr, 0o777) < 0) {
                         self.giveup("wordToStr: proc sub file chmod failed", .{});
                     }
 
@@ -294,75 +307,94 @@ pub const CmdExecutor = struct {
 
                     // Write to the file during execution.
                     self.stdout_fno = fd;
-                    const status = self.exec(proc_sub);
+                    const maybeStatus = self.exec(proc_sub);
                     self.stdout_fno = original_out_fd;
 
                     // Signal that we're done writing to the file.
-                    c.close(fd);
+                    _ = c.close(fd);
 
                     // If the command failed, bail!
+                    const status = try maybeStatus;
                     if (status != 0) {
-                        self.exitErr(status);
+                        try self.exitErr(status);
                     }
 
                     // Reopen the file with the correct flags.
-                    fd = c.open(file_name, c.O_RDONLY);
+                    fd = c.open(file_name_buf[0..].ptr, c.O_RDONLY);
                     if (fd < 0) {
                         self.giveup("wordToStr: proc sub file reopen failed", .{});
+                        unreachable;
                     }
 
                     // Provide the filename as "/dev/fd/$FD".
-                    std.fmt.format(res, "/dev/fd/{}", .{fd});
+                    try res.appendSlice(try std.fmt.allocPrint(self.allocator, "/dev/fd/{d}", .{fd}));
                 },
             }
         }
+
+        return res.toOwnedSlice();
     }
 
     fn getVar(self: Self, name: []u8) !?[]u8 {
         // Check if this is a special var name.
         if (std.mem.eql(u8, "!", name)) {
-            std.fmt.allocPrint(self.allocator, "{}", .{self.last_pid});
+            return try std.fmt.allocPrint(self.allocator, "{d}", .{self.last_pid.?});
         }
 
         // CHeck if we have a var def for the command.
         var value = self.vars.get(name);
         if (value == null) {
             // Fall back to the environment.
-            value = std.os.getenv(value);
+            const envVal = std.os.getenv(name);
+            if (envVal != null) {
+                const buf = try self.allocator.alloc(u8, envVal.?.len - 1);
+                @memcpy(buf, envVal.?[0 .. envVal.?.len - 1]);
+
+                value = buf;
+            }
         }
 
         return value;
     }
 
-    fn giveup(_: *Self, fmt: []u8, args: anytype) void {
-        std.log.err("executor error: " ++ fmt, args);
+    fn giveup(_: Self, comptime _: []const u8, _: anytype) void {
+        // std.log.err(fmt, args);
         std.os.exit(1);
     }
 
-    fn exitErr(self: *Self, status: c_int) void {
-        c.longjmp(self.err_jump, status);
+    fn exitErr(self: *Self, status: c_int) Error!void {
+        self.exit_status_code = @intCast(status);
     }
 
-    const ArgvHandle = struct {
+    const CStringVecHandle = struct {
         allocator: std.mem.Allocator,
-        argv: ?[][*]u8,
+        vec: [:null]?[*:0]const u8,
+        vec_item_slices: [][]u8,
 
         pub fn fromSlice(allocator: std.mem.Allocator, slice: [][]u8) !@This() {
-            const argv = try allocator.allocSentinel([*]u8, slice.len, 0);
-            for (slice) |arg| {
-                const c_arg = try allocator.allocSentinel(u8, arg.len, 0);
-                @memcpy(c_arg, arg);
+            const vec_item_slices = try allocator.alloc([]u8, slice.len);
+
+            const res = try allocator.allocSentinel(?[*:0]const u8, slice.len, null);
+            for (slice, 0..) |subSlice, i| {
+                const cArg = try allocator.dupeZ(u8, subSlice);
+
+                vec_item_slices[i] = cArg;
+                res[i] = cArg.ptr;
             }
 
-            .{ allocator, argv };
+            return .{
+                .allocator = allocator,
+                .vec = res,
+                .vec_item_slices = vec_item_slices,
+            };
         }
 
-        pub fn deinit(self: @This()) void {
-            for (self.argv) |arg| {
-                self.allocator.free(arg);
-            }
+        // pub fn deinit(self: @This()) void {
+        //     for (self.vec) |arg| {
+        //         self.allocator.free(arg);
+        //     }
 
-            self.allocator.free(self.argv);
-        }
+        //     self.allocator.free(self.vec);
+        // }
     };
 };

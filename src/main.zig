@@ -26,7 +26,7 @@ fn onexit() void {
 
 fn emain() !void {
     var allocator = std.heap.page_allocator;
-    var parser_executor = try ParserExecutor.init(&allocator);
+    var parser_executor = ParserExecutor.init(allocator);
 
     const args = try Args.parse(&allocator);
 
@@ -36,7 +36,7 @@ fn emain() !void {
             var line_copy = try allocator.alloc(u8, line.len);
             mem.copy(u8, line_copy, line);
 
-            const status = try parser_executor.parse_exec(line_copy);
+            const status = try parser_executor.exec(line_copy);
             if (status != 0) {
                 std.os.exit(status);
             }
@@ -46,7 +46,7 @@ fn emain() !void {
     }
 
     if (args.cmd_str) |cmd_str| {
-        const status = try parser_executor.parse_exec(cmd_str);
+        const status = try parser_executor.exec(cmd_str);
         if (status != 0) {
             std.os.exit(status);
         }
@@ -54,7 +54,7 @@ fn emain() !void {
         return;
     }
 
-    try interactive(parser_executor);
+    try interactive(&parser_executor);
 }
 
 fn interactive(parser_executor: *ParserExecutor) !void {
