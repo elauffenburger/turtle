@@ -1,84 +1,76 @@
 #!/usr/bin/env bash
 
-profile=
+TURTLE_BIN="$(dirname "$0")/../zig-out/bin/turtle"
+
+SKIP_BUILD=
+PROFILE=
 
 usage() {
-    echo "usage: $0 [--no-build]"
+    cat <<EOF
+usage: $0 [ARGS...]
+
+ARGS:
+    --no-build  skips the build step
+EOF
     exit 1
 }
 
 t() {
-    name=$1
+    NAME="$1"
     shift
 
-    temp_file=$(mktemp)
-    echo "$*" >$temp_file
+    TEMP_FILE=$(mktemp)
+    echo "$*" >"$TEMP_FILE"
 
-    expected_with_time=$(/usr/bin/env bash -c "time /usr/bin/env bash <(cat $temp_file)" 2>&1)
-    expected=$(head -n -3 <<<"$expected_with_time")
-    expected_time=$(tail -n -3 <<<"$expected_with_time" | tr '\n' ' ')
-    expected_exit_code="$?"
+    EXPECTED_WITH_TIME=$(/usr/bin/env bash -c "time /usr/bin/env bash <(cat $TEMP_FILE)" 2>&1)
+    EXPECTED=$(ghead -n -3 <<<"$EXPECTED_WITH_TIME")
+    EXPECTED_TIME=$(gtail -n -3 <<<"$EXPECTED_WITH_TIME" | tr '\n' ' ')
+    EXPECTED_EXIT_CODE="$?"
 
-    actual_with_time=$(/usr/bin/env bash -c "time ./build/turtle <(cat $temp_file)" 2>&1)
-    actual=$(head -n -3 <<<"$actual_with_time")
-    actual_time=$(tail -n -3 <<<"$actual_with_time" | tr '\n' ' ')
-    actual_exit_code="$?"
+    ACTUAL_WITH_TIME=$(/usr/bin/env bash -c "time $TURTLE_BIN <(cat $TEMP_FILE)" 2>&1)
+    ACTUAL=$(ghead -n -3 <<<"$ACTUAL_WITH_TIME")
+    ACTUAL_TIME=$(gtail -n -3 <<<"$ACTUAL_WITH_TIME" | tr '\n' ' ')
+    ACTUAL_EXIT_CODE="$?"
 
-    local outputs_match
-    [[ "$actual" == "$expected" ]] && outputs_match=true
+    OUTPUTS_MATCH=
+    [[ "$ACTUAL" == "$EXPECTED" ]] && OUTPUTS_MATCH=1
 
-    local status_codes_match
-    [[ "$actual_exit_code" == "$expected_exit_code" ]] && status_codes_match=true
+    STATUS_CODES_MATCH=
+    [[ "$ACTUAL_EXIT_CODE" == "$EXPECTED_EXIT_CODE" ]] && STATUS_CODES_MATCH=1
 
-    if [[ "$outputs_match" == 'true' && "$status_codes_match" == 'true' ]]; then
-        echo "- PASS: $name"
+    if [[ "$OUTPUTS_MATCH" == 1 && "$STATUS_CODES_MATCH" == 1 ]]; then
+        echo "- PASS: $NAME"
 
-        if [[ "$profile" == 1 ]]; then
-            echo "  - expected time: $expected_time"
-            echo "  - actual time  : $actual_time"
+        if [[ "$PROFILE" == 1 ]]; then
+            echo "  - expected time: $EXPECTED_TIME"
+            echo "  - actual time  : $ACTUAL_TIME"
         fi
 
         return
     fi
 
-    echo "- FAIL: $name"
+    echo "- FAIL: $NAME"
 
-    if [[ "$status_codes_match" != 'true' ]]; then
-        echo "  - expected exit code: $expected_exit_code"
-        echo "  - actual exit code  : $actual_exit_code"
+    if [[ "$STATUS_CODES_MATCH" != 1 ]]; then
+        echo "  - expected exit code: $EXPECTED_EXIT_CODE"
+        echo "  - actual exit code  : $ACTUAL_EXIT_CODE"
     fi
 
-    if [[ "$outputs_match" != 'true' ]]; then
-        echo "  - expected: $expected"
-        echo "  - actual  : $actual"
+    if [[ "$OUTPUTS_MATCH" != 1 ]]; then
+        echo "  - expected: $EXPECTED"
+        echo "  - actual  : $ACTUAL"
     fi
-}
-
-tests() {
-    t 'vars' 'foo=bar; echo $foo'
-    t 'vars - env' 'foo=bar echo $foo'
-    t 'pipes' 'echo world | xargs -I{} echo "hello {}!"'
-    t 'comments' 'echo foo bar baz #foo bar'
-    t 'command sub' 'echo $(echo foo) $(echo bar)'
-    t 'proc sub' 'cat <(echo foo bar)'
-    t 'multiple stmts' 'echo foo; echo bar;'
-    t 'and - true' 'true && echo foo'
-    t 'and - false' 'false && echo foo'
-    t 'or - true' 'true || echo foo'
-    t 'or - false' 'false || echo foo'
-    t 'dot source' '. <(echo "echo foo")'
 }
 
 main() {
-    skip_build=
     while [[ "$#" -gt 0 ]]; do
         case $1 in
         '--no-build')
-            skip_build=1
+            SKIP_BUILD=1
             ;;
 
         '--profile')
-            profile=1
+            PROFILE=1
             ;;
         *)
             echo "unknown flag $1"
@@ -89,13 +81,13 @@ main() {
         shift
     done
 
-    if [[ "$skip_build" != 1 ]]; then
+    if [[ "$SKIP_BUILD" != 1 ]]; then
         # Build turtle.
         echo "building..."
-        build_output=$(./bin/build.sh 2>&1)
-        if [[ $? != 0 ]]; then
+        BUILD_OUTPUT=$($(dirname "$0")/build.sh 2>&1)
+        if [[ "$?" != 0 ]]; then
             echo 'build failed'
-            echo "$build_output"
+            echo "$BUILD_OUTPUT"
             exit 1
         fi
 
@@ -103,6 +95,22 @@ main() {
     fi
 
     tests
+}
+
+tests() {
+    t 'vars' 'foo=bar; echo $FOO'
+    t 'vars - env' 'foo=bar echo $FOO'
+    t 'pipes' 'echo world | xargs -I{} echo "hello {}!"'
+    t 'comments' 'echo foo bar baz #foo bar'
+    t 'command sub' 'echo $(echo foo) $(echo bar)'
+    t 'proc sub' 'cat <(echo foo bar)'
+    t 'multiple stmts' 'echo foo; echo bar;'
+    t 'and - true' 'true && echo foo'
+    t 'and - false' 'false && echo foo'
+    t 'or - true' 'true || echo foo'
+    t 'or - false' 'false || echo foo'
+    t 'dot source' '. <(echo "echo foo")'
+    t 'strings' 'echo "foo"'
 }
 
 main "$@"
