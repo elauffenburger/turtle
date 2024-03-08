@@ -118,7 +118,7 @@ pub const CmdExecutor = struct {
                     const left_status = try self.forkExec(args.items);
 
                     // If the left side failed, bail!
-                    if (left_status == 0) {
+                    if (left_status != 0) {
                         return left_status;
                     }
 

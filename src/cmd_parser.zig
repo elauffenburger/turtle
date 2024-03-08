@@ -10,7 +10,6 @@ const COMMENT = '#';
 
 pub const Error = error{
     EOF,
-    NotStarted,
 };
 
 pub const CmdParser = struct {
@@ -21,7 +20,6 @@ pub const CmdParser = struct {
     buf_offset: usize,
     buf: []u8,
     in_sub: bool,
-    started: bool,
 
     pub fn init(allocator: std.mem.Allocator, buf: []u8) Self {
         return .{
@@ -29,7 +27,6 @@ pub const CmdParser = struct {
             .buf_offset = 0,
             .buf = buf,
             .in_sub = false,
-            .started = false,
         };
     }
 
@@ -60,7 +57,7 @@ pub const CmdParser = struct {
             }
 
             i += 1;
-            ch = try self.peek(i);
+            ch = self.peek(i) catch break;
         }
 
         part.name = try self.take(i);
@@ -91,7 +88,7 @@ pub const CmdParser = struct {
 
             // If this isn't a literal character, then report an error.
             if (!isLiteralChar(ch)) {
-                self.onErr("parseWordLiteral: unexpected character {s}", .{ch});
+                self.giveup("parseWordLiteral: unexpected character {any}", .{ch});
             }
 
             i += 1;
@@ -116,10 +113,13 @@ pub const CmdParser = struct {
             }
 
             i += 1;
-            ch = try self.peek(i);
+            ch = self.peek(i) catch break;
         }
 
         part.literal = try self.take(i);
+
+        _ = self.next() catch {};
+
         return part;
     }
 
@@ -134,7 +134,7 @@ pub const CmdParser = struct {
         part.quoted = false;
         try part.parts.append(try self.parseStringLiteral(isStrUnquotedLitChar));
 
-        _ = try self.next();
+        _ = self.next() catch {};
 
         return part;
     }
@@ -145,12 +145,12 @@ pub const CmdParser = struct {
     fn parseSub(self: *Self) anyerror!*cmd.Cmd {
         const subPrefix = try self.curr();
         if (!(subPrefix == '$' or subPrefix == '<')) {
-            self.onErr("parseSub: unexpected char in cmd sub: {s}", .{subPrefix});
+            self.giveup("parseSub: unexpected char in cmd sub: {any}", .{subPrefix});
         }
 
         const openingBrace = try self.next();
         if (openingBrace != '(') {
-            self.onErr("parseSub: unexpected char in cmd sub: {s}", .{openingBrace});
+            self.giveup("parseSub: unexpected char in cmd sub: {any}", .{openingBrace});
         }
 
         // Set up the sub_parser to start on the first character of the subexpr.
@@ -190,10 +190,10 @@ pub const CmdParser = struct {
             } else if (ch == STR_QUOTED) {
                 _ = try self.next();
             } else {
-                self.onErr("parseStrQuoted: unexpected char: {s}", .{ch});
+                self.giveup("parseStrQuoted: unexpected char: {any}", .{ch});
             }
 
-            ch = try self.curr();
+            ch = self.curr() catch break;
         }
 
         return res;
@@ -213,7 +213,7 @@ pub const CmdParser = struct {
                 return self.parseStrQuoted();
             },
             else => {
-                self.onErr("parseStr: unexpected char in string: {s}", .{ch});
+                self.giveup("parseStr: unexpected char in string: {any}", .{ch});
                 unreachable;
             },
         }
@@ -270,7 +270,7 @@ pub const CmdParser = struct {
                         .variable = try self.parseVarExpand(),
                     };
                 } else {
-                    self.onErr("parseWord: unexpected character: {s}", .{ch});
+                    self.giveup("parseWord: unexpected character: {any}", .{ch});
                 }
             };
 
@@ -341,7 +341,7 @@ pub const CmdParser = struct {
 
                         break :blk .{ .and_cmd = try self.parse() };
                     } else {
-                        self.onErr("parse: background procs not implemented", .{});
+                        self.giveup("parse: background procs not implemented", .{});
                     }
                 }
 
@@ -358,7 +358,7 @@ pub const CmdParser = struct {
                     break :blk .{ .piped_cmd = try self.parse() };
                 }
 
-                self.onErr("parse: unexpected char {s}", .{ch});
+                self.giveup("parse: unexpected char {any}", .{ch});
                 unreachable;
             });
 
@@ -419,31 +419,31 @@ pub const CmdParser = struct {
         }
     }
 
-    fn onErr(_: *Self, _: []const u8, _: anytype) noreturn {
-        // std.log.err(fmt, args);
+    fn giveup(_: *Self, comptime fmt: []const u8, args: anytype) noreturn {
+        std.log.err(fmt, args);
         std.os.exit(1);
     }
 };
 
-fn isAlpha(ch: u8) bool {
+inline fn isAlpha(ch: u8) bool {
     return (ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z');
 }
 
-fn isNumeric(ch: u8) bool {
+inline fn isNumeric(ch: u8) bool {
     return ch >= 48 and ch <= 57;
 }
 
-fn isLiteralChar(ch: u8) bool {
+inline fn isLiteralChar(ch: u8) bool {
     return !(ch == ' ' or ch == '\n' or ch == '$' or ch == '`' or ch == '<' or
         ch == '>' or ch == '&' or ch == STR_QUOTED or ch == STR_UNQUOTED or
         ch == PIPE or ch == ';');
 }
 
-fn isVarNameChar(ch: u8) bool {
+inline fn isVarNameChar(ch: u8) bool {
     return isAlpha(ch) or isNumeric(ch) or ch == '_';
 }
 
-fn isEndOfLine(ch: u8) bool {
+inline fn isEndOfLine(ch: u8) bool {
     return ch == '\n' or ch == 0;
 }
 
