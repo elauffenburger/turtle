@@ -37,77 +37,15 @@ pub const CmdExecutor = struct {
         };
     }
 
-    fn replaceFd(self: Self, old_fd: c_int, new_fd: c_int) void {
-        if (c.close(old_fd) < 0) {
-            self.giveup("replaceFd: failed to close {any}\n", .{old_fd});
-        }
-
-        if (c.dup(new_fd) < 0) {
-            self.giveup("forkExec: failed to dup {any} to {any}\n", .{ new_fd, old_fd });
-        }
-    }
-
-    pub fn forkExec(self: *Self, args: [][]u8) !u8 {
-        const pid = try std.os.fork();
-        if (pid == 0) {
-            if (self.stdin_fno != c.STDIN_FILENO) {
-                self.replaceFd(c.STDIN_FILENO, self.stdin_fno);
-            }
-
-            if (self.stdout_fno != c.STDOUT_FILENO) {
-                self.replaceFd(c.STDOUT_FILENO, self.stdout_fno);
-            }
-
-            const argv = try CStringVecHandle.fromSlice(self.allocator, args);
-            // defer argv.deinit();
-
-            const env_pairs = blk: {
-                var res = std.ArrayList([]u8).init(self.allocator);
-
-                var iter = self.vars.iterator();
-                var maybe_entry = iter.next();
-                while (maybe_entry != null) {
-                    const entry = maybe_entry.?;
-
-                    try res.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* }));
-                }
-
-                break :blk try res.toOwnedSlice();
-            };
-            // defer self.allocator.free(env_pairs);
-
-            const envp = try CStringVecHandle.fromSlice(self.allocator, env_pairs);
-            // defer envp.deinit();
-
-            // Finally run this thing.
-            const err = std.os.execvpeZ(argv.vec[0].?, argv.vec.ptr, envp.vec.ptr);
-
-            // If we got here, that means the exec failed!
-            self.giveup("execTerm: exec {s} failed: {any}", .{ args[0], err });
-        }
-
-        // Record the child process' pid as the last_pid.
-        self.last_pid = pid;
-
-        // Wait for the child to finish.
-        const res = std.os.waitpid(pid, 0);
-
-        // HACK: looks like there's some kind of result code mangling on Mac OS at least
-        // that shifts the num 8 bits to the right, so let's undo that...
-        const status: u8 = @intCast(res.status >> 8);
-
-        return status;
-    }
-
     pub fn exec(self: *Self, command: *cmd.Cmd) anyerror!u8 {
         var args = std.ArrayList([]u8).init(self.allocator);
 
         // Set up executor err jump.
         for (command.parts.items, 0..) |part, i| {
             switch (part) {
-                .varAssign => |varAssign| {
-                    const name = varAssign.name;
-                    const value = try self.wordToStr(varAssign.value);
+                .var_assign => |var_assign| {
+                    const name = var_assign.name;
+                    const value = try self.wordToStr(var_assign.value);
 
                     // If this is the only part of the command, set the var as an executor
                     // var.
@@ -124,7 +62,7 @@ pub const CmdExecutor = struct {
                     try args.append(try self.wordToStr(word));
                 },
 
-                .pipedCmd => |pipedCmd| {
+                .piped_cmd => |piped_cmd| {
                     const original_fnos = [_]c_int{ self.stdin_fno, self.stdout_fno };
 
                     var pipe_fnos = [2]c_int{ 0, 0 };
@@ -153,7 +91,7 @@ pub const CmdExecutor = struct {
                     self.stdin_fno = pipe_fnos[0];
 
                     // Execute the right side.
-                    const right_status = try self.exec(pipedCmd);
+                    const right_status = try self.exec(piped_cmd);
 
                     // Signal that we're done reading.
                     _ = c.close(pipe_fnos[0]);
@@ -164,7 +102,7 @@ pub const CmdExecutor = struct {
                     return right_status;
                 },
 
-                .orCmd => |orCmd| {
+                .or_cmd => |or_cmd| {
                     const left_status = try self.forkExec(args.items);
 
                     // If the left side succeeded, we're done!
@@ -173,10 +111,10 @@ pub const CmdExecutor = struct {
                     }
 
                     // Otherwise, execute the or'd command.
-                    return try self.exec(orCmd);
+                    return try self.exec(or_cmd);
                 },
 
-                .andCmd => |andCmd| {
+                .and_cmd => |and_cmd| {
                     const left_status = try self.forkExec(args.items);
 
                     // If the left side failed, bail!
@@ -185,7 +123,7 @@ pub const CmdExecutor = struct {
                     }
 
                     // Otherwise, execute the and'd command.
-                    return try self.exec(andCmd);
+                    return try self.exec(and_cmd);
                 },
             }
         }
@@ -371,6 +309,68 @@ pub const CmdExecutor = struct {
         self.exit_status_code = @intCast(status);
     }
 
+    fn replaceFd(self: Self, old_fd: c_int, new_fd: c_int) void {
+        if (c.close(old_fd) < 0) {
+            self.giveup("replaceFd: failed to close {any}\n", .{old_fd});
+        }
+
+        if (c.dup(new_fd) < 0) {
+            self.giveup("forkExec: failed to dup {any} to {any}\n", .{ new_fd, old_fd });
+        }
+    }
+
+    fn forkExec(self: *Self, args: [][]u8) !u8 {
+        const pid = try std.os.fork();
+        if (pid == 0) {
+            if (self.stdin_fno != c.STDIN_FILENO) {
+                self.replaceFd(c.STDIN_FILENO, self.stdin_fno);
+            }
+
+            if (self.stdout_fno != c.STDOUT_FILENO) {
+                self.replaceFd(c.STDOUT_FILENO, self.stdout_fno);
+            }
+
+            const argv = try CStringVecHandle.fromSlice(self.allocator, args);
+            // defer argv.deinit();
+
+            const env_pairs = blk: {
+                var res = std.ArrayList([]u8).init(self.allocator);
+
+                var iter = self.vars.iterator();
+                var maybe_entry = iter.next();
+                while (maybe_entry != null) {
+                    const entry = maybe_entry.?;
+
+                    try res.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* }));
+                }
+
+                break :blk try res.toOwnedSlice();
+            };
+            // defer self.allocator.free(env_pairs);
+
+            const envp = try CStringVecHandle.fromSlice(self.allocator, env_pairs);
+            // defer envp.deinit();
+
+            // Finally run this thing.
+            const err = std.os.execvpeZ(argv.vec[0].?, argv.vec.ptr, envp.vec.ptr);
+
+            // If we got here, that means the exec failed!
+            self.giveup("execTerm: exec {s} failed: {any}", .{ args[0], err });
+        }
+
+        // Record the child process' pid as the last_pid.
+        self.last_pid = pid;
+
+        // Wait for the child to finish.
+        const res = std.os.waitpid(pid, 0);
+
+        // HACK: looks like there's some kind of result code mangling on Mac OS at least
+        // that shifts the num 8 bits to the right, so let's undo that...
+        const status: u8 = @intCast(res.status >> 8);
+
+        return status;
+    }
+
     const CStringVecHandle = struct {
         allocator: std.mem.Allocator,
         vec: [:null]?[*:0]const u8,
@@ -394,12 +394,12 @@ pub const CmdExecutor = struct {
             };
         }
 
-        // pub fn deinit(self: @This()) void {
-        //     for (self.vec) |arg| {
-        //         self.allocator.free(arg);
-        //     }
+        pub fn deinit(_: @This()) void {
+            // for (self.vec) |arg| {
+            //     self.allocator.free(arg);
+            // }
 
-        //     self.allocator.free(self.vec);
-        // }
+            // self.allocator.free(self.vec);
+        }
     };
 };

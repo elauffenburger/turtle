@@ -9,7 +9,7 @@ const PIPE = '|';
 const COMMENT = '#';
 
 pub const Error = error{
-    OutOfInput,
+    EOF,
     NotStarted,
 };
 
@@ -143,7 +143,7 @@ pub const CmdParser = struct {
     ///
     /// The cursor will be placed after the sub.
     fn parseSub(self: *Self) anyerror!*cmd.Cmd {
-        const subPrefix = try self.next();
+        const subPrefix = try self.curr();
         if (!(subPrefix == '$' or subPrefix == '<')) {
             self.onErr("parseSub: unexpected char in cmd sub: {s}", .{subPrefix});
         }
@@ -153,13 +153,16 @@ pub const CmdParser = struct {
             self.onErr("parseSub: unexpected char in cmd sub: {s}", .{openingBrace});
         }
 
+        // Set up the sub_parser to start on the first character of the subexpr.
+        _ = try self.next();
+
         // Create a new parser that will parse the subexpression using the current buffer position.
-        var subParser = Self.init(self.allocator, self.buf[self.buf_offset..]);
-        subParser.in_sub = true;
-        const sub = try subParser.parse();
+        var sub_parser = Self.init(self.allocator, self.buf[self.buf_offset..]);
+        sub_parser.in_sub = true;
+        const sub = try sub_parser.parse();
 
         // Skip ahead however many characters the subexpression parsing consumed.
-        _ = try self.take(subParser.buf_offset);
+        _ = try self.take(sub_parser.buf_offset);
 
         return sub;
     }
@@ -311,14 +314,19 @@ pub const CmdParser = struct {
                     var word = try self.parseWord();
 
                     // Check if this is a var assignment.
-                    if (canSetVars and word.parts.items.len == 1 and word.parts.items[0].literal.len > 0 and self.curr() catch ' ' == '=') {
-                        _ = try self.next();
+                    if (canSetVars and word.parts.items.len == 1 and self.curr() catch ' ' == '=') {
+                        switch (word.parts.items[0].*) {
+                            .literal => {
+                                _ = try self.next();
 
-                        const varAssignment = try self.allocator.create(cmd.CmdVarAssign);
-                        varAssignment.name = word.parts.items[0].literal;
-                        varAssignment.value = try self.parseWord();
+                                const var_assignment = try self.allocator.create(cmd.Cmdvar_assign);
+                                var_assignment.name = word.parts.items[0].literal;
+                                var_assignment.value = try self.parseWord();
 
-                        break :blk .{ .varAssign = varAssignment };
+                                break :blk .{ .var_assign = var_assignment };
+                            },
+                            else => {},
+                        }
                     }
 
                     break :blk .{ .word = word };
@@ -331,7 +339,7 @@ pub const CmdParser = struct {
 
                         _ = try self.next();
 
-                        break :blk .{ .andCmd = try self.parse() };
+                        break :blk .{ .and_cmd = try self.parse() };
                     } else {
                         self.onErr("parse: background procs not implemented", .{});
                     }
@@ -344,10 +352,10 @@ pub const CmdParser = struct {
                     if (ch == PIPE) {
                         _ = try self.next();
 
-                        break :blk .{ .orCmd = try self.parse() };
+                        break :blk .{ .or_cmd = try self.parse() };
                     }
 
-                    break :blk .{ .pipedCmd = try self.parse() };
+                    break :blk .{ .piped_cmd = try self.parse() };
                 }
 
                 self.onErr("parse: unexpected char {s}", .{ch});
@@ -368,7 +376,15 @@ pub const CmdParser = struct {
     }
 
     fn next(self: *Self) Error!u8 {
-        self.buf_offset += 1;
+        const new_offset = self.buf_offset + 1;
+
+        // Always set the offset to the new offset so we can detect if we're at the EOF after this call.
+        self.buf_offset = new_offset;
+
+        if (new_offset >= self.buf.len) {
+            return Error.EOF;
+        }
+
         return self.buf[self.buf_offset];
     }
 
@@ -399,7 +415,7 @@ pub const CmdParser = struct {
         if (effectiveOffset >= 0 and effectiveOffset < self.buf.len) {
             return self.buf[effectiveOffset];
         } else {
-            return Error.OutOfInput;
+            return Error.EOF;
         }
     }
 

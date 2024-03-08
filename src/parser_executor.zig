@@ -17,7 +17,7 @@ pub const ParserExecutor = struct {
         var lastStatus: u8 = 0;
         while (true) {
             const cmd = parser.parse() catch |err| switch (err) {
-                cmd_parser.Error.OutOfInput => break,
+                cmd_parser.Error.EOF => break,
                 else => return err,
             };
 
