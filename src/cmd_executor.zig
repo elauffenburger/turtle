@@ -37,17 +37,25 @@ pub const CmdExecutor = struct {
         };
     }
 
+    fn replaceFd(self: Self, old_fd: c_int, new_fd: c_int) void {
+        if (c.close(old_fd) < 0) {
+            self.giveup("replaceFd: failed to close {any}\n", .{old_fd});
+        }
+
+        if (c.dup(new_fd) < 0) {
+            self.giveup("forkExec: failed to dup {any} to {any}\n", .{ new_fd, old_fd });
+        }
+    }
+
     pub fn forkExec(self: *Self, args: [][]u8) !u8 {
-        var pid = try std.os.fork();
+        const pid = try std.os.fork();
         if (pid == 0) {
             if (self.stdin_fno != c.STDIN_FILENO) {
-                _ = c.close(c.STDIN_FILENO);
-                _ = c.dup(self.stdin_fno);
+                self.replaceFd(c.STDIN_FILENO, self.stdin_fno);
             }
 
             if (self.stdout_fno != c.STDOUT_FILENO) {
-                _ = c.close(c.STDOUT_FILENO);
-                _ = c.dup(self.stdout_fno);
+                self.replaceFd(c.STDOUT_FILENO, self.stdout_fno);
             }
 
             const argv = try CStringVecHandle.fromSlice(self.allocator, args);
@@ -146,6 +154,9 @@ pub const CmdExecutor = struct {
 
                     // Execute the right side.
                     const right_status = try self.exec(pipedCmd);
+
+                    // Signal that we're done reading.
+                    _ = c.close(pipe_fnos[0]);
 
                     // Restore the read fno.
                     self.stdin_fno = original_fnos[0];

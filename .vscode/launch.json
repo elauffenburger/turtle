@@ -28,7 +28,7 @@
             "request": "launch",
             "args": [
                 "-c",
-                "echo foo"
+                "echo build.zig | cat"
             ],
             "program": "${workspaceFolder}/zig-out/bin/turtle",
             "MIMode": "lldb",
