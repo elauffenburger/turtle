@@ -28,7 +28,7 @@
             "request": "launch",
             "args": [
                 "-c",
-                "echo \"foo\""
+                "FOO=bar; echo $FOO"
             ],
             "program": "${workspaceFolder}/zig-out/bin/turtle",
             "MIMode": "lldb",

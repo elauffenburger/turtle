@@ -313,13 +313,15 @@ pub const CmdParser = struct {
                 if (isLiteralChar(ch) or ch == STR_UNQUOTED or ch == STR_QUOTED or ch == VAR_EXPAND_START or ch == '<') {
                     var word = try self.parseWord();
 
+                    // TODO: this don't work none -- something like `FOO=bar; echo $FOO` gets parsed to ' ' so we need to either parse this differently or change the way we detect var assignments.
+
                     // Check if this is a var assignment.
                     if (canSetVars and word.parts.items.len == 1 and self.curr() catch ' ' == '=') {
                         switch (word.parts.items[0].*) {
                             .literal => {
                                 _ = try self.next();
 
-                                const var_assignment = try self.allocator.create(cmd.Cmdvar_assign);
+                                const var_assignment = try self.allocator.create(cmd.CmdVar);
                                 var_assignment.name = word.parts.items[0].literal;
                                 var_assignment.value = try self.parseWord();
 

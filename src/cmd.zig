@@ -12,7 +12,7 @@ pub const Cmd = struct {
     }
 };
 
-pub const Cmdvar_assign = struct {
+pub const CmdVar = struct {
     name: []u8,
     value: *CmdWord,
 };
@@ -27,7 +27,7 @@ pub const CmdPartType = enum {
 
 pub const CmdPart = union(CmdPartType) {
     word: *CmdWord,
-    var_assign: *Cmdvar_assign,
+    var_assign: *CmdVar,
     piped_cmd: *Cmd,
     or_cmd: *Cmd,
     and_cmd: *Cmd,
