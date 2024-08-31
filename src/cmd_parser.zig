@@ -20,6 +20,7 @@ pub const CmdParser = struct {
     buf_offset: usize,
     buf: []u8,
     in_sub: bool,
+    can_set_vars: bool,
 
     pub fn init(allocator: std.mem.Allocator, buf: []u8) Self {
         return .{
@@ -27,6 +28,7 @@ pub const CmdParser = struct {
             .buf_offset = 0,
             .buf = buf,
             .in_sub = false,
+            .can_set_vars = false,
         };
     }
 
@@ -76,13 +78,12 @@ pub const CmdParser = struct {
 
         var ch = try self.curr();
         while (true) {
-            // Check if we're done with the current substitution (if any).
-            if (self.in_sub and ch == ')') {
-                break;
-            }
 
-            // Check if we've reached a terminating character.
-            if (ch == ' ' or ch == '\n' or ch == ';') {
+            // If one of the following is true, we're done!
+            //  * ch is an "end of word" character
+            //  * we're in a substitution and ch is the end of the substitution
+            //  * we can currently set vars and ch is an '='
+            if (self.isEndOfWordChar(ch)) {
                 break;
             }
 
@@ -234,11 +235,12 @@ pub const CmdParser = struct {
                 return word;
             }
 
-            if (ch == ' ' or ch == '\n' or ch == ';' or (self.in_sub and ch == ')')) {
+            // If this is the end of the word, we're done!
+            if (self.isEndOfWordChar(ch)) {
                 return word;
             }
 
-            var part = try self.allocator.create(cmd.CmdWordPart);
+            const part = try self.allocator.create(cmd.CmdWordPart);
             part.* = blk: {
                 // Check if this is a command sub.
                 if (ch == VAR_EXPAND_START and try self.peek(1) == '(') {
@@ -281,14 +283,22 @@ pub const CmdParser = struct {
         return word;
     }
 
+    fn isEndOfWordChar(self: Self, ch: u8) bool {
+        // If one of the following is true, we're done!
+        //  * ch is an "end of word" character
+        //  * we're in a substitution and ch is the end of the substitution
+        //  * we can currently set vars and ch is an '='
+        return (ch == ' ' or ch == '\n' or ch == ';') or (self.in_sub and ch == ')') or (self.can_set_vars and ch == '=');
+    }
+
     /// parse parses the init'd input and returns an executable cmd*.
     pub fn parse(self: *Self) anyerror!*cmd.Cmd {
+        self.can_set_vars = true;
+
         const res = try self.allocator.create(cmd.Cmd);
         res.* = cmd.Cmd.init(self.allocator);
 
-        var canSetVars = true;
         var ch = try self.curr();
-
         while (true) {
             if (isEndOfLine(ch)) {
                 break;
@@ -311,24 +321,29 @@ pub const CmdParser = struct {
             try res.parts.append(blk: {
                 // Check if this is a literal word.
                 if (isLiteralChar(ch) or ch == STR_UNQUOTED or ch == STR_QUOTED or ch == VAR_EXPAND_START or ch == '<') {
-                    var word = try self.parseWord();
-
-                    // TODO: this don't work none -- something like `FOO=bar; echo $FOO` gets parsed to ' ' so we need to either parse this differently or change the way we detect var assignments.
+                    const word = try self.parseWord();
 
                     // Check if this is a var assignment.
-                    if (canSetVars and word.parts.items.len == 1 and self.curr() catch ' ' == '=') {
+                    if (self.can_set_vars and word.parts.items.len == 1 and self.curr() catch ' ' == '=') {
                         switch (word.parts.items[0].*) {
                             .literal => {
                                 _ = try self.next();
 
+                                self.can_set_vars = false;
+                                const value = try self.parseWord();
+                                self.can_set_vars = true;
+
                                 const var_assignment = try self.allocator.create(cmd.CmdVar);
                                 var_assignment.name = word.parts.items[0].literal;
-                                var_assignment.value = try self.parseWord();
+                                var_assignment.value = value;
 
                                 break :blk .{ .var_assign = var_assignment };
                             },
                             else => {},
                         }
+                    } else {
+                        // Once we're done setting vars, we can no longer set vars.
+                        self.can_set_vars = false;
                     }
 
                     break :blk .{ .word = word };
@@ -337,7 +352,7 @@ pub const CmdParser = struct {
                 if (ch == '&') {
                     ch = try self.next();
                     if (ch == '&') {
-                        canSetVars = true;
+                        self.can_set_vars = true;
 
                         _ = try self.next();
 
@@ -348,7 +363,7 @@ pub const CmdParser = struct {
                 }
 
                 if (ch == PIPE) {
-                    canSetVars = true;
+                    self.can_set_vars = true;
 
                     ch = try self.next();
                     if (ch == PIPE) {
@@ -371,7 +386,7 @@ pub const CmdParser = struct {
     }
 
     fn consumeToEndOfLine(self: *Self) !void {
-        var ch = try self.curr();
+        const ch = try self.curr();
         while (!isEndOfLine(ch)) {
             _ = try self.next();
         }
@@ -412,7 +427,7 @@ pub const CmdParser = struct {
     }
 
     fn peek(self: Self, offset: usize) Error!u8 {
-        var effectiveOffset = self.buf_offset + offset;
+        const effectiveOffset = self.buf_offset + offset;
 
         if (effectiveOffset >= 0 and effectiveOffset < self.buf.len) {
             return self.buf[effectiveOffset];
@@ -423,7 +438,7 @@ pub const CmdParser = struct {
 
     fn giveup(_: *Self, comptime fmt: []const u8, args: anytype) noreturn {
         std.log.err(fmt, args);
-        std.os.exit(1);
+        std.posix.exit(1);
     }
 };
 

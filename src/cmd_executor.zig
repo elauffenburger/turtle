@@ -66,7 +66,7 @@ pub const CmdExecutor = struct {
                     const original_fnos = [_]c_int{ self.stdin_fno, self.stdout_fno };
 
                     var pipe_fnos = [2]c_int{ 0, 0 };
-                    if (c.pipe(pipe_fnos[0..].ptr) < 0) {
+                    if (c.pipe(&pipe_fnos) < 0) {
                         self.giveup("exec: pipe failed", .{});
                     }
 
@@ -288,7 +288,7 @@ pub const CmdExecutor = struct {
         var value = self.vars.get(name);
         if (value == null) {
             // Fall back to the environment.
-            const envVal = std.os.getenv(name);
+            const envVal = std.posix.getenv(name);
             if (envVal != null) {
                 const buf = try self.allocator.alloc(u8, envVal.?.len - 1);
                 @memcpy(buf, envVal.?[0 .. envVal.?.len - 1]);
@@ -302,7 +302,7 @@ pub const CmdExecutor = struct {
 
     fn giveup(_: Self, comptime fmt: []const u8, args: anytype) void {
         std.debug.print(fmt, args);
-        std.os.exit(1);
+        std.posix.exit(1);
     }
 
     fn exitErr(self: *Self, status: u32) Error!void {
@@ -320,7 +320,7 @@ pub const CmdExecutor = struct {
     }
 
     fn forkExec(self: *Self, args: [][]u8) !u8 {
-        const pid = try std.os.fork();
+        const pid = try std.posix.fork();
         if (pid == 0) {
             if (self.stdin_fno != c.STDIN_FILENO) {
                 self.replaceFd(c.STDIN_FILENO, self.stdin_fno);
@@ -336,13 +336,13 @@ pub const CmdExecutor = struct {
             const env_pairs = blk: {
                 var res = std.ArrayList([]u8).init(self.allocator);
 
-                var iter = self.vars.iterator();
-                var maybe_entry = iter.next();
-                while (maybe_entry != null) {
-                    const entry = maybe_entry.?;
+                // var iter = self.vars.iterator();
+                // var maybe_entry = iter.next();
+                // while (maybe_entry != null) {
+                //     const entry = maybe_entry.?;
 
-                    try res.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* }));
-                }
+                //     try res.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* }));
+                // }
 
                 break :blk try res.toOwnedSlice();
             };
@@ -352,7 +352,7 @@ pub const CmdExecutor = struct {
             // defer envp.deinit();
 
             // Finally run this thing.
-            const err = std.os.execvpeZ(argv.vec[0].?, argv.vec.ptr, envp.vec.ptr);
+            const err = std.posix.execvpeZ(argv.vec[0].?, argv.vec.ptr, envp.vec.ptr);
 
             // If we got here, that means the exec failed!
             self.giveup("execTerm: exec {s} failed: {any}", .{ args[0], err });
@@ -362,7 +362,7 @@ pub const CmdExecutor = struct {
         self.last_pid = pid;
 
         // Wait for the child to finish.
-        const res = std.os.waitpid(pid, 0);
+        const res = std.posix.waitpid(pid, 0);
 
         // HACK: looks like there's some kind of result code mangling on Mac OS at least
         // that shifts the num 8 bits to the right, so let's undo that...

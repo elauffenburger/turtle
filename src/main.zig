@@ -1,7 +1,6 @@
 const std = @import("std");
 const debug = std.debug;
 const mem = std.mem;
-const os = std.os;
 
 const Args = @import("args.zig").Args;
 const ParserExecutor = @import("parser_executor.zig").ParserExecutor;
@@ -16,7 +15,7 @@ const c = @cImport({
 
 pub fn main() void {
     emain() catch {
-        os.exit(1);
+        std.posix.exit(1);
     };
 }
 
@@ -28,19 +27,17 @@ fn emain() !void {
     var allocator = std.heap.page_allocator;
     var parser_executor = ParserExecutor.init(allocator);
 
-    // try testfork();
-
     const args = try Args.parse(&allocator);
 
     if (args.filename) |filename| {
         var file_line_iter = std.mem.split(u8, try std.fs.cwd().readFileAlloc(allocator, filename, 1000000000000), "\n");
         while (file_line_iter.next()) |line| {
-            var line_copy = try allocator.alloc(u8, line.len);
-            mem.copy(u8, line_copy, line);
+            const line_copy = try allocator.alloc(u8, line.len);
+            @memcpy(line_copy, line);
 
             const status = try parser_executor.exec(line_copy);
             if (status != 0) {
-                std.os.exit(status);
+                std.posix.exit(status);
             }
         }
 
@@ -50,7 +47,7 @@ fn emain() !void {
     if (args.cmd_str) |cmd_str| {
         const status = try parser_executor.exec(cmd_str);
         if (status != 0) {
-            std.os.exit(status);
+            std.posix.exit(status);
         }
 
         return;
@@ -80,32 +77,7 @@ fn interactive(parser_executor: *ParserExecutor) !void {
 
         const status = try parser_executor.exec(mem.span(line.?));
         if (status != 0) {
-            std.os.exit(status);
+            std.posix.exit(status);
         }
     }
-}
-
-fn testfork() !void {
-    var allocator = std.heap.page_allocator;
-
-    const pid = try os.fork();
-    if (pid == 0) {
-        std.debug.print("hi from child!\n", .{});
-
-        const prog = try std.fmt.allocPrintZ(allocator, "echo", .{});
-
-        const argv = try allocator.allocSentinel(?[*:0]const u8, 2, null);
-        argv[0] = try std.fmt.allocPrintZ(allocator, "echo", .{});
-        argv[1] = try std.fmt.allocPrintZ(allocator, "foo", .{});
-
-        const envp = try allocator.allocSentinel(?[*:0]const u8, 0, null);
-
-        std.os.execvpeZ(prog.ptr, argv.ptr, envp.ptr) catch {};
-
-        os.exit(0);
-    }
-
-    const res = os.waitpid(pid, 0);
-    std.debug.print("child exited with: {any}\n", .{res.status});
-    std.os.exit(@intCast(res.status));
 }

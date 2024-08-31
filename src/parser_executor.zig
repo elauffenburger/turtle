@@ -6,12 +6,16 @@ const cmd_executor = @import("cmd_executor.zig");
 
 pub const ParserExecutor = struct {
     allocator: mem.Allocator,
+    executor: cmd_executor.CmdExecutor,
 
     pub fn init(allocator: mem.Allocator) ParserExecutor {
-        return .{ .allocator = allocator };
+        return .{
+            .allocator = allocator,
+            .executor = cmd_executor.CmdExecutor.init(allocator),
+        };
     }
 
-    pub fn exec(self: ParserExecutor, line: []u8) !u8 {
+    pub fn exec(self: *ParserExecutor, line: []u8) !u8 {
         var parser = cmd_parser.CmdParser.init(self.allocator, line);
 
         var lastStatus: u8 = 0;
@@ -21,8 +25,7 @@ pub const ParserExecutor = struct {
                 else => return err,
             };
 
-            var executor = cmd_executor.CmdExecutor.init(self.allocator);
-            lastStatus = try executor.exec(cmd);
+            lastStatus = try self.executor.exec(cmd);
         }
 
         return lastStatus;

@@ -1,4 +1,4 @@
-const Builder = @import("std").build.Builder;
+const Build = @import("std").Build;
 
 const c_flags = [_][]const u8{
     "-Werror",
@@ -23,12 +23,12 @@ const c_flags = [_][]const u8{
     "-Wno-error=switch-enum",
 };
 
-pub fn build(b: *Builder) !void {
+pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     var turtle = b.addExecutable(.{
         .name = "turtle",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("./src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
