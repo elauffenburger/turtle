@@ -62,6 +62,7 @@ pub const CmdExecutor = struct {
                     try args.append(try self.wordToStr(word));
                 },
 
+                // HACK: we're actually supposed to start up commands in advance of the pipe or else commands that keep the pipe open won't stream properly (because we'll never create the target process).
                 .piped_cmd => |piped_cmd| {
                     const original_fnos = [_]c_int{ self.stdin_fno, self.stdout_fno };
 
@@ -330,29 +331,15 @@ pub const CmdExecutor = struct {
                 self.replaceFd(c.STDOUT_FILENO, self.stdout_fno);
             }
 
-            const argv = try CStringVecHandle.fromSlice(self.allocator, args);
-            // defer argv.deinit();
+            const argv = try toCStringVec(self.allocator, args);
+            // defer self.allocator.destroy(argv.ptr);
 
-            const env_pairs = blk: {
-                var res = std.ArrayList([]u8).init(self.allocator);
-
-                // var iter = self.vars.iterator();
-                // var maybe_entry = iter.next();
-                // while (maybe_entry != null) {
-                //     const entry = maybe_entry.?;
-
-                //     try res.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* }));
-                // }
-
-                break :blk try res.toOwnedSlice();
-            };
-            // defer self.allocator.free(env_pairs);
-
-            const envp = try CStringVecHandle.fromSlice(self.allocator, env_pairs);
-            // defer envp.deinit();
+            const envp_vec = [_][]u8{};
+            const envp = try toCStringVec(self.allocator, &envp_vec);
+            // defer self.allocator.destroy(envp);
 
             // Finally run this thing.
-            const err = std.posix.execvpeZ(argv.vec[0].?, argv.vec.ptr, envp.vec.ptr);
+            const err = std.posix.execvpeZ(argv[0].?, argv, envp);
 
             // If we got here, that means the exec failed!
             self.giveup("execTerm: exec {s} failed: {any}", .{ args[0], err });
@@ -371,35 +358,12 @@ pub const CmdExecutor = struct {
         return status;
     }
 
-    const CStringVecHandle = struct {
-        allocator: std.mem.Allocator,
-        vec: [:null]?[*:0]const u8,
-        vec_item_slices: [][]u8,
-
-        pub fn fromSlice(allocator: std.mem.Allocator, slice: [][]u8) !@This() {
-            const vec_item_slices = try allocator.alloc([]u8, slice.len);
-
-            const res = try allocator.allocSentinel(?[*:0]const u8, slice.len, null);
-            for (slice, 0..) |subSlice, i| {
-                const cArg = try allocator.dupeZ(u8, subSlice);
-
-                res[i] = cArg;
-                vec_item_slices[i] = cArg;
-            }
-
-            return .{
-                .allocator = allocator,
-                .vec = res,
-                .vec_item_slices = vec_item_slices,
-            };
+    fn toCStringVec(allocator: std.mem.Allocator, slice: [][]u8) ![*:null]?[*:0]const u8 {
+        const vec = try allocator.allocSentinel(?[*:0]const u8, slice.len, null);
+        for (slice, 0..) |str, i| {
+            vec[i] = try allocator.dupeZ(u8, str);
         }
 
-        pub fn deinit(_: @This()) void {
-            // for (self.vec) |arg| {
-            //     self.allocator.free(arg);
-            // }
-
-            // self.allocator.free(self.vec);
-        }
-    };
+        return vec;
+    }
 };

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -eu -o pipefail
 
 main() {
     # If zig-out doesn't exist already, assume this is the first build
