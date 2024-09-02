@@ -22,6 +22,11 @@ pub const CmdExecutor = struct {
     vars: std.StringHashMap([]u8),
     stdin_fno: c_int,
     stdout_fno: c_int,
+    pipeline: std.ArrayList(struct {
+        pid: i32,
+        stdin_fno: c_int,
+        stdout_fno: c_int,
+    }),
     last_pid: ?c_int,
 
     exit_status_code: ?u8,
@@ -32,6 +37,7 @@ pub const CmdExecutor = struct {
             .vars = std.StringHashMap([]u8).init(allocator),
             .stdin_fno = c.STDIN_FILENO,
             .stdout_fno = c.STDOUT_FILENO,
+            .pipeline = @TypeOf(@field(Self, "pipeline")).init(allocator),
             .last_pid = null,
             .exit_status_code = null,
         };
@@ -39,6 +45,7 @@ pub const CmdExecutor = struct {
 
     pub fn exec(self: *Self, command: *cmd.Cmd) anyerror!u8 {
         var args = std.ArrayList([]u8).init(self.allocator);
+        const env = std.ArrayList([]u8).init(self.allocator);
 
         // Set up executor err jump.
         for (command.parts.items, 0..) |part, i| {
@@ -63,44 +70,44 @@ pub const CmdExecutor = struct {
                 },
 
                 // HACK: we're actually supposed to start up commands in advance of the pipe or else commands that keep the pipe open won't stream properly (because we'll never create the target process).
+
+                // If we hit a piped cmd, we need to execute _all_ subsequent piped commands as part of the same pipeline.
                 .piped_cmd => |piped_cmd| {
-                    const original_fnos = [_]c_int{ self.stdin_fno, self.stdout_fno };
+                    // exec the currently built command
+                    // push the pid into the pipeline queue
 
-                    var pipe_fnos = [2]c_int{ 0, 0 };
-                    if (c.pipe(&pipe_fnos) < 0) {
-                        self.giveup("exec: pipe failed", .{});
+                    while (true) {
+                        var pipe_fnos = [2]c_int{ 0, 0 };
+                        if (c.pipe(&pipe_fnos) < 0) {
+                            self.giveup("pipe failed", .{});
+                        }
+
+                        const fnos = blk: {
+                            if (self.pipeline.getLastOrNull()) |prev_pipeline_cmd| {
+                                break :blk [2]c_int{ prev_pipeline_cmd.stdout_fno, pipe_fnos[1] };
+                            }
+
+                            break :blk [2]c_int{ self.stdin_fno, pipe_fnos[0] };
+                        };
+
+                        // Fork-exec the left side but don't wait for it.
+                        const pid = self.forkExec(.{
+                            .argv = args.items,
+                            .envp = env.items,
+                            .stdin_fno = fnos[0],
+                            .stdout_fno = fnos[1],
+                        });
+
+                        // Add the piped cmd info to the queue.
+                        self.pipeline.append(.{
+                            .pid = pid,
+                            .stdin_fno = fnos[0],
+                            .stdout_fno = fnos[1],
+                        });
+
+                        // Execute the right side.
+                        return try self.exec(piped_cmd);
                     }
-
-                    // Write to the write end of the pipe.
-                    self.stdout_fno = pipe_fnos[1];
-
-                    // Execute the left side.
-                    const left_status = try self.forkExec(args.items);
-                    if (left_status != 0) {
-                        _ = c.close(pipe_fnos[0]);
-                        _ = c.close(pipe_fnos[1]);
-
-                        self.stdin_fno = original_fnos[0];
-                        self.stdout_fno = original_fnos[1];
-
-                        return left_status;
-                    }
-
-                    // Close the write end of the pipe (we're done writing), restore the output fno, and read from the read end.
-                    _ = c.close(pipe_fnos[1]);
-                    self.stdout_fno = original_fnos[1];
-                    self.stdin_fno = pipe_fnos[0];
-
-                    // Execute the right side.
-                    const right_status = try self.exec(piped_cmd);
-
-                    // Signal that we're done reading.
-                    _ = c.close(pipe_fnos[0]);
-
-                    // Restore the read fno.
-                    self.stdin_fno = original_fnos[0];
-
-                    return right_status;
                 },
 
                 .or_cmd => |or_cmd| {
@@ -129,11 +136,22 @@ pub const CmdExecutor = struct {
             }
         }
 
+        // If there's an in-progress pipeline, flush it!
+        self.waitForPipeline();
+
         if (args.items.len == 0) {
             return 0;
         }
 
         return try self.forkExec(args.items);
+    }
+
+    fn waitForPipeline(self: *Self) !u8 {
+        for (self.pipeline.items) |cmd| {
+            self.wait(cmd.pid);
+        }
+
+        self.pipeline.clearAndFree();
     }
 
     fn wordToStr(self: *Self, word: *cmd.CmdWord) anyerror![]u8 {
@@ -320,34 +338,41 @@ pub const CmdExecutor = struct {
         }
     }
 
-    fn forkExec(self: *Self, args: [][]u8) !u8 {
+    const ForkExecArgs = struct {
+        argv: [][]u8,
+        envp: [][]u8,
+        stdin_fno: c_int,
+        stdout_fno: c_int,
+    };
+
+    fn forkExec(self: *Self, args: ForkExecArgs) !i32 {
         const pid = try std.posix.fork();
         if (pid == 0) {
-            if (self.stdin_fno != c.STDIN_FILENO) {
-                self.replaceFd(c.STDIN_FILENO, self.stdin_fno);
+            if (args.stdin_fno != c.STDIN_FILENO) {
+                args.replaceFd(c.STDIN_FILENO, self.stdin_fno);
             }
 
-            if (self.stdout_fno != c.STDOUT_FILENO) {
-                self.replaceFd(c.STDOUT_FILENO, self.stdout_fno);
+            if (args.stdout_fno != c.STDOUT_FILENO) {
+                args.replaceFd(c.STDOUT_FILENO, self.stdout_fno);
             }
 
-            const argv = try toCStringVec(self.allocator, args);
+            const argv = try toCStringVec(self.allocator, args.argv);
             // defer self.allocator.destroy(argv.ptr);
 
-            const envp_vec = [_][]u8{};
-            const envp = try toCStringVec(self.allocator, &envp_vec);
+            const envp = try toCStringVec(self.allocator, args.envp);
             // defer self.allocator.destroy(envp);
 
             // Finally run this thing.
             const err = std.posix.execvpeZ(argv[0].?, argv, envp);
 
             // If we got here, that means the exec failed!
-            self.giveup("execTerm: exec {s} failed: {any}", .{ args[0], err });
+            self.giveup("execTerm: exec {s} failed: {any}", .{ args.argv[0], err });
         }
 
-        // Record the child process' pid as the last_pid.
-        self.last_pid = pid;
+        return pid;
+    }
 
+    fn wait(pid: i32) u8 {
         // Wait for the child to finish.
         const res = std.posix.waitpid(pid, 0);
 
