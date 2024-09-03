@@ -206,7 +206,7 @@ pub const CmdExecutor = struct {
 
                 // Start up each process in the pipeline.
                 var stdin_fno = opts.stdin_fno;
-                for (pipeline.cmds.items, 0..) |pipeline_cmd, i| {
+                for (pipeline.cmds.items) |pipeline_cmd| {
                     // TODO: make sure we don't have any in-progress args/env/etc. because that would indicate an error with the parsing (since the pipeline cmds should be self-contained).
 
                     // Create a pipe for this part of the pipeline.
@@ -227,13 +227,8 @@ pub const CmdExecutor = struct {
                     });
 
                     // Close the fnos we created for this process so we don't pass them onto future children in the pipeline.
-                    //
-                    // Note that if this is the last command in the pipeline, then we don't want to close its stdout since we'll want
-                    // to pipe that to stdout later.
                     _ = c.close(fnos[0]);
-                    if (i != pipeline.cmds.items.len - 1) {
-                        _ = c.close(fnos[1]);
-                    }
+                    _ = c.close(fnos[1]);
 
                     const pipeline_cmd_info = PipelineCmdInfo{
                         .pid = exec_result.pid,
@@ -248,9 +243,6 @@ pub const CmdExecutor = struct {
                     stdin_fno = pipe_fnos[0];
                 }
 
-                // Close the dangling stdin fno.
-                _ = c.close(stdin_fno);
-
                 var exit_status: u8 = 0;
                 for (pipeline_cmds.items) |pipeline_cmd| {
                     const status = Self.wait(pipeline_cmd.pid);
@@ -260,6 +252,20 @@ pub const CmdExecutor = struct {
                         exit_status = status;
                     }
                 }
+
+                // Read the output from the last stdin_fno into our stdout.
+                var buf = [_]c_char{0} ** c.BUFSIZ;
+                while (true) {
+                    const n: usize = @intCast(c.read(stdin_fno, &buf, c.BUFSIZ));
+                    if (n <= 0) {
+                        break;
+                    }
+
+                    _ = c.write(opts.stdout_fno, &buf, n);
+                }
+
+                // Close the last stdin fno.
+                _ = c.close(stdin_fno);
 
                 return .{ .status = exit_status };
             },
@@ -454,7 +460,7 @@ pub const CmdExecutor = struct {
         stdout_fno: c_int,
     };
 
-    fn replaceFds(old: c_int, new: c_int) void {
+    fn replaceFd(old: c_int, new: c_int) void {
         _ = c.dup2(old, new);
         _ = c.close(old);
     }
@@ -462,8 +468,13 @@ pub const CmdExecutor = struct {
     fn forkExecNoWait(self: *Self, args: ForkExecArgs) !i32 {
         const pid = try std.posix.fork();
         if (pid == 0) {
-            replaceFds(args.stdin_fno, std.posix.STDIN_FILENO);
-            replaceFds(args.stdout_fno, std.posix.STDOUT_FILENO);
+            if (args.stdin_fno != c.STDIN_FILENO) {
+                replaceFd(args.stdin_fno, std.posix.STDIN_FILENO);
+            }
+
+            if (args.stdout_fno != c.STDOUT_FILENO) {
+                replaceFd(args.stdout_fno, std.posix.STDOUT_FILENO);
+            }
 
             const argv = try toCStringVec(self.allocator, args.argv);
             // defer self.allocator.destroy(argv.ptr);

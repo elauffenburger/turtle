@@ -100,7 +100,7 @@ main() {
 tests() {
     t 'vars' 'FOO=bar; echo $FOO'
     t 'vars - env (ignored)' 'FOO=bar echo $FOO'
-    t 'pipes' 'echo world | xargs -I{} echo "hello {}!"'
+    t 'pipes' 'echo world | sed "s/o/a/"'
     t 'comments' 'echo foo bar baz #foo bar'
     t 'command sub' 'echo $(echo foo) $(echo bar)'
     t 'proc sub' 'cat <(echo foo bar)'
