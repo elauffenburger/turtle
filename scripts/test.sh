@@ -111,6 +111,8 @@ tests() {
     t 'or - false' 'false || echo foo'
     t 'dot source' '. <(echo "echo foo")'
     t 'strings' 'echo "foo"'
+
+    echo 'done!'
 }
 
 main "$@"

@@ -18,15 +18,22 @@ const Error = error{
 pub const CmdExecutor = struct {
     const Self = @This();
 
+    const PipelineCmdInfo = struct {
+        pid: i32,
+        stdin_fno: c_int,
+        stdout_fno: c_int,
+    };
+
+    const PipelineInfo = struct {
+        cmds: std.ArrayList(PipelineCmdInfo),
+        next_stdin: c_int,
+    };
+
     allocator: std.mem.Allocator,
     vars: std.StringHashMap([]u8),
     stdin_fno: c_int,
     stdout_fno: c_int,
-    pipeline: std.ArrayList(struct {
-        pid: i32,
-        stdin_fno: c_int,
-        stdout_fno: c_int,
-    }),
+    pipeline: ?*PipelineInfo,
     last_pid: ?c_int,
 
     exit_status_code: ?u8,
@@ -37,7 +44,7 @@ pub const CmdExecutor = struct {
             .vars = std.StringHashMap([]u8).init(allocator),
             .stdin_fno = c.STDIN_FILENO,
             .stdout_fno = c.STDOUT_FILENO,
-            .pipeline = @TypeOf(@field(Self, "pipeline")).init(allocator),
+            .pipeline = null,
             .last_pid = null,
             .exit_status_code = null,
         };
@@ -73,45 +80,64 @@ pub const CmdExecutor = struct {
 
                 // If we hit a piped cmd, we need to execute _all_ subsequent piped commands as part of the same pipeline.
                 .piped_cmd => |piped_cmd| {
-                    // exec the currently built command
-                    // push the pid into the pipeline queue
+                    // Create a pipe for this part of the pipeline.
+                    var pipe_fnos = [2]c_int{ 0, 0 };
+                    if (c.pipe(&pipe_fnos) < 0) {
+                        self.giveup("pipe failed", .{});
+                    }
 
-                    while (true) {
-                        var pipe_fnos = [2]c_int{ 0, 0 };
-                        if (c.pipe(&pipe_fnos) < 0) {
-                            self.giveup("pipe failed", .{});
+                    // Figure out what stdin and stdout should be for the left side of the pipe.
+                    const fnos = blk: {
+                        // If we're adding to an existing pipeline:
+                        //   stdin is stdout from the previous command.
+                        //   stdout is the write end of the pipe we created.
+                        if (self.pipeline) |pipeline| {
+                            break :blk [2]c_int{ pipeline.next_stdin, pipe_fnos[1] };
                         }
 
-                        const fnos = blk: {
-                            if (self.pipeline.getLastOrNull()) |prev_pipeline_cmd| {
-                                break :blk [2]c_int{ prev_pipeline_cmd.stdout_fno, pipe_fnos[1] };
-                            }
+                        // If this is the start of a new pipeline:
+                        //   stdin is stdin
+                        //   stdout is the write end of the pipe we created
+                        break :blk [2]c_int{ self.stdin_fno, pipe_fnos[1] };
+                    };
 
-                            break :blk [2]c_int{ self.stdin_fno, pipe_fnos[0] };
-                        };
+                    // TODO: create all procs in the pipeline in a separate proc group.
+                    // Fork-exec the left side but don't wait for it.
+                    const pid = try self.forkExecNoWait(.{
+                        .argv = args.items,
+                        .envp = env.items,
+                        .stdin_fno = fnos[0],
+                        .stdout_fno = fnos[1],
+                    });
 
-                        // Fork-exec the left side but don't wait for it.
-                        const pid = self.forkExec(.{
-                            .argv = args.items,
-                            .envp = env.items,
-                            .stdin_fno = fnos[0],
-                            .stdout_fno = fnos[1],
-                        });
+                    const pipeline_cmd_info = PipelineCmdInfo{
+                        .pid = pid,
+                        .stdin_fno = fnos[0],
+                        .stdout_fno = fnos[1],
+                    };
 
-                        // Add the piped cmd info to the queue.
-                        self.pipeline.append(.{
-                            .pid = pid,
-                            .stdin_fno = fnos[0],
-                            .stdout_fno = fnos[1],
-                        });
-
-                        // Execute the right side.
-                        return try self.exec(piped_cmd);
+                    // Init the pipeline if it doesn't already exist.
+                    if (self.pipeline == null) {
+                        self.pipeline = try self.allocator.create(PipelineInfo);
+                        self.pipeline.?.cmds = std.ArrayList(PipelineCmdInfo).init(self.allocator);
                     }
+
+                    // Add the left side of the pipe to the pipeline.
+                    try self.pipeline.?.cmds.append(pipeline_cmd_info);
+                    // Keep track of the read end of the pipe as stdin for the next command we create in the pipeline.
+                    self.pipeline.?.next_stdin = pipe_fnos[0];
+
+                    // Execute the right side.
+                    return try self.exec(piped_cmd);
                 },
 
                 .or_cmd => |or_cmd| {
-                    const left_status = try self.forkExec(args.items);
+                    const left_status = try self.forkExec(.{
+                        .argv = args.items,
+                        .envp = env.items,
+                        .stdin_fno = self.stdin_fno,
+                        .stdout_fno = self.stdout_fno,
+                    });
 
                     // If the left side succeeded, we're done!
                     if (left_status == 0) {
@@ -123,7 +149,12 @@ pub const CmdExecutor = struct {
                 },
 
                 .and_cmd => |and_cmd| {
-                    const left_status = try self.forkExec(args.items);
+                    const left_status = try self.forkExec(.{
+                        .argv = args.items,
+                        .envp = env.items,
+                        .stdin_fno = self.stdin_fno,
+                        .stdout_fno = self.stdout_fno,
+                    });
 
                     // If the left side failed, bail!
                     if (left_status != 0) {
@@ -137,21 +168,48 @@ pub const CmdExecutor = struct {
         }
 
         // If there's an in-progress pipeline, flush it!
-        self.waitForPipeline();
+        if (self.pipeline) |_| {
+            _ = try self.waitForPipeline();
+        }
 
         if (args.items.len == 0) {
             return 0;
         }
 
-        return try self.forkExec(args.items);
+        return try self.forkExec(.{
+            .argv = args.items,
+            .envp = env.items,
+            .stdin_fno = self.stdin_fno,
+            .stdout_fno = self.stdout_fno,
+        });
     }
 
+    const ExecutionError = error{
+        NoActivePipeline,
+    };
+
     fn waitForPipeline(self: *Self) !u8 {
-        for (self.pipeline.items) |cmd| {
-            self.wait(cmd.pid);
+        if (self.pipeline == null) {
+            return ExecutionError.NoActivePipeline;
         }
 
-        self.pipeline.clearAndFree();
+        const pipeline = self.pipeline.?;
+
+        defer self.pipeline = null;
+        defer self.allocator.destroy(pipeline);
+        defer pipeline.cmds.clearAndFree();
+
+        var exit_status: u8 = 0;
+        for (pipeline.cmds.items) |pipeline_cmd| {
+            const status = Self.wait(pipeline_cmd.pid);
+
+            // TODO: gracefully clean up other procs.
+            if (status != 0) {
+                exit_status = status;
+            }
+        }
+
+        return exit_status;
     }
 
     fn wordToStr(self: *Self, word: *cmd.CmdWord) anyerror![]u8 {
@@ -163,9 +221,9 @@ pub const CmdExecutor = struct {
                     try res.appendSlice(literal);
                 },
                 .str => |str| {
-                    if (str.quoted) {
+                    if (str.expandable) {
                         for (str.parts.items) |str_part| {
-                            switch (str_part.*) {
+                            switch (str_part) {
                                 .literal => |literal| {
                                     try res.appendSlice(literal);
                                 },
@@ -180,7 +238,7 @@ pub const CmdExecutor = struct {
                         }
                     } else {
                         for (str.parts.items) |str_part| {
-                            switch (str_part.*) {
+                            switch (str_part) {
                                 .literal => |literal| {
                                     try res.appendSlice(literal);
                                 },
@@ -345,15 +403,15 @@ pub const CmdExecutor = struct {
         stdout_fno: c_int,
     };
 
-    fn forkExec(self: *Self, args: ForkExecArgs) !i32 {
+    fn forkExecNoWait(self: *Self, args: ForkExecArgs) !i32 {
         const pid = try std.posix.fork();
         if (pid == 0) {
             if (args.stdin_fno != c.STDIN_FILENO) {
-                args.replaceFd(c.STDIN_FILENO, self.stdin_fno);
+                self.replaceFd(c.STDIN_FILENO, args.stdin_fno);
             }
 
             if (args.stdout_fno != c.STDOUT_FILENO) {
-                args.replaceFd(c.STDOUT_FILENO, self.stdout_fno);
+                self.replaceFd(c.STDOUT_FILENO, args.stdout_fno);
             }
 
             const argv = try toCStringVec(self.allocator, args.argv);
@@ -370,6 +428,10 @@ pub const CmdExecutor = struct {
         }
 
         return pid;
+    }
+
+    fn forkExec(self: *Self, args: ForkExecArgs) !u8 {
+        return Self.wait(try self.forkExecNoWait(args));
     }
 
     fn wait(pid: i32) u8 {

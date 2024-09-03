@@ -1,8 +1,8 @@
 const std = @import("std");
 const cmd = @import("cmd.zig");
 
-const STR_UNQUOTED = '\'';
-const STR_QUOTED = '"';
+const STR_SINGLE_QUOTE = '\'';
+const STR_DOUBLE_QUOTE = '"';
 const VAR_EXPAND_START = '$';
 const VAR_ASSIGN = '=';
 const PIPE = '|';
@@ -101,11 +101,19 @@ pub const CmdParser = struct {
 
     /// parseStringLiteral parses a string literal.
     ///
-    /// The cursor will be placed at the end of the literal
-    /// (e.g. "foo" will be returned and the cursor will be at '$' in "foo$bar").
-    fn parseStringLiteral(self: *Self, predicate: *const fn (u8) bool) !*cmd.CmdWordPartStrPart {
-        const part = try self.allocator.create(cmd.CmdWordPartStrPart);
-
+    /// The cursor will be placed at the end of the literal.
+    /// examples:
+    /// ```
+    /// _: returned char
+    /// ^: the position of the cursor after returning
+    ///
+    /// "foobar"
+    ///  ______^
+    ///
+    /// "foo$bar"
+    ///  ___^
+    /// ```
+    fn parseStringLiteral(self: *Self, predicate: *const fn (u8) bool) !cmd.CmdWordPartStrPart {
         var i: u32 = 0;
         var ch = try self.curr();
         while (true) {
@@ -117,23 +125,22 @@ pub const CmdParser = struct {
             ch = self.peek(i) catch break;
         }
 
-        part.literal = try self.take(i);
-
-        _ = self.next() catch {};
-
-        return part;
+        return cmd.CmdWordPartStrPart{
+            .literal = try self.take(i),
+        };
     }
 
-    /// parseStrUnquoted parses an unquoted string.
+    /// parseStrNonExpandable parses a non-expandable string (e.g. 'foo').
     ///
     /// The cursor will be placed after the string
     /// (e.g. "'foo'" will be returned and the cursor will be at ' ' in "'foo' bar").
-    fn parseStrUnquoted(self: *Self) !*cmd.CmdWordPartStr {
+    fn parseStrNonExpandable(self: *Self) !*cmd.CmdWordPartStr {
         _ = try self.next();
 
         const part = try self.allocator.create(cmd.CmdWordPartStr);
-        part.quoted = false;
-        try part.parts.append(try self.parseStringLiteral(isStrUnquotedLitChar));
+        part.* = cmd.CmdWordPartStr.init(self.allocator, false);
+
+        try part.parts.append(try self.parseStringLiteral(isNonExpandableStrLitChar));
 
         _ = self.next() catch {};
 
@@ -168,12 +175,12 @@ pub const CmdParser = struct {
         return sub;
     }
 
-    /// cmd_parser_parse_str_quoted parses a quoted string.
+    /// parseStrExpandable parses an expandable string (e.g. "foo").
     ///
     /// The cursor will be placed after the string.
     /// (e.g. '"foo$bar"' will be returned and the cursor will be at ' ' in
     /// '"foo$bar" baz').
-    fn parseStrQuoted(self: *Self) !*cmd.CmdWordPartStr {
+    fn parseStrExpandable(self: *Self) !*cmd.CmdWordPartStr {
         _ = try self.next();
 
         const res = try self.allocator.create(cmd.CmdWordPartStr);
@@ -181,17 +188,16 @@ pub const CmdParser = struct {
 
         var ch = try self.curr();
         while (true) {
-            if (isStrQuotedLitChar(ch)) {
-                try res.parts.append(try self.parseStringLiteral(isStrQuotedLitChar));
+            if (ch == STR_DOUBLE_QUOTE) {
+                _ = self.next() catch break;
+                break;
+            } else if (isExpandableStrLitChar(ch)) {
+                try res.parts.append(try self.parseStringLiteral(isExpandableStrLitChar));
             } else if (ch == VAR_EXPAND_START) {
-                const part = try self.allocator.create(cmd.CmdWordPartStrPart);
-                part.variable = try self.parseVarExpand();
-
+                const part = @unionInit(cmd.CmdWordPartStrPart, "variable", try self.parseVarExpand());
                 try res.parts.append(part);
-            } else if (ch == STR_QUOTED) {
-                _ = try self.next();
             } else {
-                self.giveup("parseStrQuoted: unexpected char: {any}", .{ch});
+                self.giveup("parseStrExpandable: unexpected char: {any}", .{ch});
             }
 
             ch = self.curr() catch break;
@@ -207,11 +213,11 @@ pub const CmdParser = struct {
     fn parseString(self: *Self) anyerror!*cmd.CmdWordPartStr {
         const ch = try self.curr();
         switch (ch) {
-            STR_UNQUOTED => {
-                return self.parseStrUnquoted();
+            STR_SINGLE_QUOTE => {
+                return self.parseStrNonExpandable();
             },
-            STR_QUOTED => {
-                return self.parseStrQuoted();
+            STR_DOUBLE_QUOTE => {
+                return self.parseStrExpandable();
             },
             else => {
                 self.giveup("parseStr: unexpected char in string: {any}", .{ch});
@@ -261,7 +267,7 @@ pub const CmdParser = struct {
                     };
                 }
                 // Check if this is a string.
-                else if (ch == STR_UNQUOTED or ch == STR_QUOTED) {
+                else if (ch == STR_SINGLE_QUOTE or ch == STR_DOUBLE_QUOTE) {
                     break :blk cmd.CmdWordPart{
                         .str = try self.parseString(),
                     };
@@ -272,7 +278,7 @@ pub const CmdParser = struct {
                         .variable = try self.parseVarExpand(),
                     };
                 } else {
-                    self.giveup("parseWord: unexpected character: {any}", .{ch});
+                    self.giveup("parseWord: unexpected character: {c}", .{ch});
                 }
             };
 
@@ -320,7 +326,7 @@ pub const CmdParser = struct {
 
             try res.parts.append(blk: {
                 // Check if this is a literal word.
-                if (isLiteralChar(ch) or ch == STR_UNQUOTED or ch == STR_QUOTED or ch == VAR_EXPAND_START or ch == '<') {
+                if (isLiteralChar(ch) or ch == STR_SINGLE_QUOTE or ch == STR_DOUBLE_QUOTE or ch == VAR_EXPAND_START or ch == '<') {
                     const word = try self.parseWord();
 
                     // Check if this is a var assignment.
@@ -452,7 +458,7 @@ inline fn isNumeric(ch: u8) bool {
 
 inline fn isLiteralChar(ch: u8) bool {
     return !(ch == ' ' or ch == '\n' or ch == '$' or ch == '`' or ch == '<' or
-        ch == '>' or ch == '&' or ch == STR_QUOTED or ch == STR_UNQUOTED or
+        ch == '>' or ch == '&' or ch == STR_DOUBLE_QUOTE or ch == STR_SINGLE_QUOTE or
         ch == PIPE or ch == ';');
 }
 
@@ -464,10 +470,11 @@ inline fn isEndOfLine(ch: u8) bool {
     return ch == '\n' or ch == 0;
 }
 
-fn isStrUnquotedLitChar(ch: u8) bool {
-    return ch != STR_UNQUOTED;
+fn isNonExpandableStrLitChar(ch: u8) bool {
+    return ch != STR_SINGLE_QUOTE;
 }
 
-fn isStrQuotedLitChar(ch: u8) bool {
+// TODO: should `\n` be included; strings can span lines!
+fn isExpandableStrLitChar(ch: u8) bool {
     return isLiteralChar(ch) or ch == ' ' or ch == ';';
 }

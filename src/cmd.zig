@@ -58,13 +58,13 @@ pub const CmdWordPart = union(CmdWordPartType) {
 };
 
 pub const CmdWordPartStr = struct {
-    quoted: bool,
-    parts: std.ArrayList(*CmdWordPartStrPart),
+    expandable: bool,
+    parts: std.ArrayList(CmdWordPartStrPart),
 
-    pub fn init(allocator: std.mem.Allocator, quoted: bool) @This() {
+    pub fn init(allocator: std.mem.Allocator, expandable: bool) @This() {
         return .{
-            .quoted = quoted,
-            .parts = std.ArrayList(*CmdWordPartStrPart).init(allocator),
+            .expandable = expandable,
+            .parts = std.ArrayList(CmdWordPartStrPart).init(allocator),
         };
     }
 };
