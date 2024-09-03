@@ -28,7 +28,7 @@
             "request": "launch",
             "args": [
                 "-c",
-                "echo \"foo\" | cat"
+                "echo \"foo\" | sed 's/f/g/' | cat"
             ],
             "program": "${workspaceFolder}/zig-out/bin/turtle",
             "MIMode": "lldb",

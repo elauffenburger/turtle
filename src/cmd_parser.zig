@@ -20,6 +20,7 @@ pub const CmdParser = struct {
     buf_offset: usize,
     buf: []u8,
     in_sub: bool,
+    in_pipeline: bool,
     can_set_vars: bool,
 
     pub fn init(allocator: std.mem.Allocator, buf: []u8) Self {
@@ -28,6 +29,7 @@ pub const CmdParser = struct {
             .buf_offset = 0,
             .buf = buf,
             .in_sub = false,
+            .in_pipeline = false,
             .can_set_vars = false,
         };
     }
@@ -301,18 +303,18 @@ pub const CmdParser = struct {
     pub fn parse(self: *Self) anyerror!*cmd.Cmd {
         self.can_set_vars = true;
 
-        const res = try self.allocator.create(cmd.Cmd);
+        var res = try self.allocator.create(cmd.Cmd);
         res.* = cmd.Cmd.init(self.allocator);
 
         var ch = try self.curr();
         while (true) {
+            ch = self.curr() catch break;
+
             if (isEndOfLine(ch)) {
                 break;
             }
 
-            while (ch == ' ') {
-                ch = self.next() catch break;
-            }
+            ch = self.chompWhitespace() catch break;
 
             if (ch == COMMENT) {
                 self.consumeToEndOfLine() catch break;
@@ -324,79 +326,134 @@ pub const CmdParser = struct {
                 return res;
             }
 
-            try res.parts.append(blk: {
-                // Check if this is a literal word.
-                if (isLiteralChar(ch) or ch == STR_SINGLE_QUOTE or ch == STR_DOUBLE_QUOTE or ch == VAR_EXPAND_START or ch == '<') {
-                    const word = try self.parseWord();
+            // Check if this is a literal word.
+            if (isLiteralChar(ch) or ch == STR_SINGLE_QUOTE or ch == STR_DOUBLE_QUOTE or ch == VAR_EXPAND_START or ch == '<') {
+                const word = try self.parseWord();
 
-                    // Check if this is a var assignment.
-                    if (self.can_set_vars and word.parts.items.len == 1 and self.curr() catch ' ' == '=') {
-                        switch (word.parts.items[0].*) {
-                            .literal => {
-                                _ = try self.next();
+                // Check if this is a var assignment.
+                if (self.can_set_vars and word.parts.items.len == 1 and self.curr() catch ' ' == '=') {
+                    switch (word.parts.items[0].*) {
+                        .literal => {
+                            _ = try self.next();
 
-                                self.can_set_vars = false;
-                                const value = try self.parseWord();
-                                self.can_set_vars = true;
+                            self.can_set_vars = false;
+                            const value = try self.parseWord();
+                            self.can_set_vars = true;
 
-                                const var_assignment = try self.allocator.create(cmd.CmdVar);
-                                var_assignment.name = word.parts.items[0].literal;
-                                var_assignment.value = value;
+                            const var_assignment = try self.allocator.create(cmd.CmdVar);
+                            var_assignment.name = word.parts.items[0].literal;
+                            var_assignment.value = value;
 
-                                break :blk .{ .var_assign = var_assignment };
-                            },
-                            else => {},
-                        }
-                    } else {
-                        // Once we're done setting vars, we can no longer set vars.
-                        self.can_set_vars = false;
+                            try res.parts.append(.{ .var_assign = var_assignment });
+                            continue;
+                        },
+                        else => {},
                     }
-
-                    break :blk .{ .word = word };
+                } else {
+                    // Once we're done setting vars, we can no longer set vars.
+                    self.can_set_vars = false;
                 }
 
+                try res.parts.append(.{ .word = word });
+                continue;
+            }
+
+            if (ch == '&') {
+                ch = try self.next();
                 if (ch == '&') {
-                    ch = try self.next();
-                    if (ch == '&') {
-                        self.can_set_vars = true;
-
-                        _ = try self.next();
-
-                        break :blk .{ .and_cmd = try self.parse() };
-                    } else {
-                        self.giveup("parse: background procs not implemented", .{});
+                    // If we're currently in a pipeline, return the command we've built so far and mark that we've reached the end of the pipeline.
+                    if (self.in_pipeline) {
+                        self.in_pipeline = false;
+                        return res;
                     }
-                }
 
-                if (ch == PIPE) {
                     self.can_set_vars = true;
 
-                    ch = try self.next();
-                    if (ch == PIPE) {
-                        _ = try self.next();
+                    _ = try self.next();
 
-                        break :blk .{ .or_cmd = try self.parse() };
+                    try res.parts.append(.{ .and_cmd = try self.parse() });
+                    continue;
+                } else {
+                    self.giveup("parse: background procs not implemented", .{});
+                }
+            }
+
+            if (ch == PIPE) {
+                self.can_set_vars = true;
+
+                ch = try self.next();
+                if (ch == PIPE) {
+                    // If we're currently in a pipeline, return the command we've built so far and mark that we've reached the end of the pipeline.
+                    if (self.in_pipeline) {
+                        self.in_pipeline = false;
+                        return res;
                     }
 
-                    var pipeline = std.ArrayList(*cmd.Cmd).init(self.allocator);
-                    try pipeline.append(try self.parse());
+                    _ = try self.next();
 
-                    // Add all subsequent commands in the pipeline.
-                    while (try self.peek(0) == PIPE and try self.peek(1) == PIPE) {
-                        try pipeline.append(try self.parse());
-                    }
-
-                    break :blk .{ .pipeline = pipeline };
+                    try res.parts.append(.{ .or_cmd = try self.parse() });
+                    continue;
                 }
 
-                self.giveup("parse: unexpected char {any}", .{ch});
-                unreachable;
-            });
+                // If we're currently in a pipeline, return the command we've built so far so we can add it to the pipeline.
+                if (self.in_pipeline) {
+                    return res;
+                }
 
-            ch = self.curr() catch break;
+                var pipeline = std.ArrayList(*cmd.Cmd).init(self.allocator);
+
+                // Now that we've realized we're for sure in a pipeline, we need to complete the command that's
+                // in-progress and add it as the first command in the pipeline.
+                //
+                // Then, we need to add as many pipeline comands as we can until we find an operation that _isn't_ a pipeline.
+
+                // Complete the first command as the first command in the pipeline.
+                try pipeline.append(res);
+
+                // Re-init the current command.
+                res = try self.allocator.create(cmd.Cmd);
+                res.* = cmd.Cmd.init(self.allocator);
+
+                // Add as many additional commands as we can.
+                self.in_pipeline = true;
+                while (true) {
+                    const next_cmd = self.parse() catch {
+                        try res.parts.append(.{ .pipeline = pipeline });
+                        break;
+                    };
+
+                    // If we've exited the pipeline, then we're done; add the pipeline part and then
+                    // add all the parts of the command we just parsed and continue.
+                    if (!self.in_pipeline) {
+                        try res.parts.append(.{ .pipeline = pipeline });
+
+                        for (next_cmd.parts.items) |part| {
+                            try res.parts.append(part);
+                        }
+
+                        continue;
+                    }
+
+                    // Otherwise, just add the cmd to the pipeline.
+                    try pipeline.append(next_cmd);
+                }
+
+                continue;
+            }
+
+            self.giveup("parse: unexpected char {any}", .{ch});
+            unreachable;
         }
 
         return res;
+    }
+
+    fn chompWhitespace(self: *Self) !u8 {
+        while (try self.peek(0) == ' ') {
+            _ = try self.next();
+        }
+
+        return try self.peek(0);
     }
 
     fn consumeToEndOfLine(self: *Self) !void {

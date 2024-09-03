@@ -89,9 +89,9 @@ pub const CmdExecutor = struct {
                 .pipeline => |pipeline_cmds| {
                     // TODO: check if there are any args/env/vars/etc.; that's probably an error with parsing if so!
 
-                    const pipeline = try std.ArrayList(ExecutableCmd).initCapacity(self.allocator, pipeline_cmds.items.len);
-                    for (pipeline_cmds.items, 0..) |pipeline_cmd, pipeline_i| {
-                        pipeline.items[pipeline_i] = try self.buildExecutableCmd(pipeline_cmd);
+                    var pipeline = try std.ArrayList(ExecutableCmd).initCapacity(self.allocator, pipeline_cmds.items.len);
+                    for (pipeline_cmds.items) |pipeline_cmd| {
+                        try pipeline.append(try self.buildExecutableCmd(pipeline_cmd));
                     }
 
                     return .{
@@ -206,7 +206,7 @@ pub const CmdExecutor = struct {
 
                 // Start up each process in the pipeline.
                 var stdin_fno = opts.stdin_fno;
-                for (pipeline.cmds.items) |pipeline_cmd| {
+                for (pipeline.cmds.items, 0..) |pipeline_cmd, i| {
                     // TODO: make sure we don't have any in-progress args/env/etc. because that would indicate an error with the parsing (since the pipeline cmds should be self-contained).
 
                     // Create a pipe for this part of the pipeline.
@@ -226,6 +226,15 @@ pub const CmdExecutor = struct {
                         .wait = false,
                     });
 
+                    // Close the fnos we created for this process so we don't pass them onto future children in the pipeline.
+                    //
+                    // Note that if this is the last command in the pipeline, then we don't want to close its stdout since we'll want
+                    // to pipe that to stdout later.
+                    _ = c.close(fnos[0]);
+                    if (i != pipeline.cmds.items.len - 1) {
+                        _ = c.close(fnos[1]);
+                    }
+
                     const pipeline_cmd_info = PipelineCmdInfo{
                         .pid = exec_result.pid,
                         .stdin_fno = fnos[0],
@@ -239,6 +248,9 @@ pub const CmdExecutor = struct {
                     stdin_fno = pipe_fnos[0];
                 }
 
+                // Close the dangling stdin fno.
+                _ = c.close(stdin_fno);
+
                 var exit_status: u8 = 0;
                 for (pipeline_cmds.items) |pipeline_cmd| {
                     const status = Self.wait(pipeline_cmd.pid);
@@ -247,14 +259,9 @@ pub const CmdExecutor = struct {
                     if (status != 0) {
                         exit_status = status;
                     }
-
-                    // Close stdout for cmd to signal to next command that the command has finished writing.
-                    std.posix.close(pipeline_cmd.stdout_fno);
                 }
 
-                return .{
-                    .status = exit_status,
-                };
+                return .{ .status = exit_status };
             },
         }
     }
@@ -440,16 +447,6 @@ pub const CmdExecutor = struct {
         self.exit_status_code = @intCast(status);
     }
 
-    fn replaceFd(self: Self, old_fd: c_int, new_fd: c_int) void {
-        if (c.close(old_fd) < 0) {
-            self.giveup("replaceFd: failed to close {any}\n", .{old_fd});
-        }
-
-        if (c.dup(new_fd) < 0) {
-            self.giveup("forkExec: failed to dup {any} to {any}\n", .{ new_fd, old_fd });
-        }
-    }
-
     const ForkExecArgs = struct {
         argv: [][]u8,
         envp: [][]u8,
@@ -457,16 +454,16 @@ pub const CmdExecutor = struct {
         stdout_fno: c_int,
     };
 
+    fn replaceFds(old: c_int, new: c_int) void {
+        _ = c.dup2(old, new);
+        _ = c.close(old);
+    }
+
     fn forkExecNoWait(self: *Self, args: ForkExecArgs) !i32 {
         const pid = try std.posix.fork();
         if (pid == 0) {
-            if (args.stdin_fno != c.STDIN_FILENO) {
-                self.replaceFd(c.STDIN_FILENO, args.stdin_fno);
-            }
-
-            if (args.stdout_fno != c.STDOUT_FILENO) {
-                self.replaceFd(c.STDOUT_FILENO, args.stdout_fno);
-            }
+            replaceFds(args.stdin_fno, std.posix.STDIN_FILENO);
+            replaceFds(args.stdout_fno, std.posix.STDOUT_FILENO);
 
             const argv = try toCStringVec(self.allocator, args.argv);
             // defer self.allocator.destroy(argv.ptr);
