@@ -206,17 +206,25 @@ pub const CmdExecutor = struct {
 
                 // Start up each process in the pipeline.
                 var stdin_fno = opts.stdin_fno;
-                for (pipeline.cmds.items) |pipeline_cmd| {
+                for (pipeline.cmds.items, 0..) |pipeline_cmd, i| {
                     // TODO: make sure we don't have any in-progress args/env/etc. because that would indicate an error with the parsing (since the pipeline cmds should be self-contained).
 
-                    // Create a pipe for this part of the pipeline.
-                    var pipe_fnos = [2]c_int{ 0, 0 };
-                    if (c.pipe(&pipe_fnos) < 0) {
-                        self.giveup("pipe failed", .{});
-                    }
+                    // Figure out what our fnos should be.
+                    //
+                    // If this is the last command in the pipeline, use the previous stdin fno, but output directly to stdout.
+                    // Otherwise, allocate a pipe we'll use to pipe output between procs.
+                    var fnos: [2]c_int = undefined;
+                    if (i == pipeline.cmds.items.len - 1) {
+                        fnos = .{ stdin_fno, opts.stdout_fno };
+                    } else {
+                        var pipe_fnos = [2]c_int{ 0, 0 };
+                        _ = c.pipe(&pipe_fnos);
 
-                    // Read from the previous command (or stdin) and write to the write end of the pipe.
-                    const fnos = [2]c_int{ stdin_fno, pipe_fnos[1] };
+                        fnos = .{ opts.stdin_fno, pipe_fnos[1] };
+
+                        // Save the read end for later.
+                        stdin_fno = pipe_fnos[0];
+                    }
 
                     // TODO: create all procs in the pipeline in a separate proc group.
                     // Fork-exec the left side but don't wait for it.
@@ -227,8 +235,12 @@ pub const CmdExecutor = struct {
                     });
 
                     // Close the fnos we created for this process so we don't pass them onto future children in the pipeline.
-                    _ = c.close(fnos[0]);
-                    _ = c.close(fnos[1]);
+                    if (fnos[0] != opts.stdin_fno) {
+                        _ = c.close(fnos[0]);
+                    }
+                    if (fnos[1] != opts.stdout_fno) {
+                        _ = c.close(fnos[1]);
+                    }
 
                     const pipeline_cmd_info = PipelineCmdInfo{
                         .pid = exec_result.pid,
@@ -238,9 +250,6 @@ pub const CmdExecutor = struct {
 
                     // Add the left side of the pipe to the pipeline.
                     try pipeline_cmds.append(pipeline_cmd_info);
-
-                    // Keep track of the read end of the pipe as stdin for the next command we create in the pipeline.
-                    stdin_fno = pipe_fnos[0];
                 }
 
                 var exit_status: u8 = 0;
@@ -251,17 +260,6 @@ pub const CmdExecutor = struct {
                     if (status != 0) {
                         exit_status = status;
                     }
-                }
-
-                // Read the output from the last stdin_fno into our stdout.
-                var buf = [_]c_char{0} ** c.BUFSIZ;
-                while (true) {
-                    const n: usize = @intCast(c.read(stdin_fno, &buf, c.BUFSIZ));
-                    if (n <= 0) {
-                        break;
-                    }
-
-                    _ = c.write(opts.stdout_fno, &buf, n);
                 }
 
                 // Close the last stdin fno.
