@@ -17,18 +17,18 @@ pub const CmdVar = struct {
     value: *CmdWord,
 };
 
-pub const CmdPartType = enum {
+pub const CmdPartTag = enum {
     word,
     var_assign,
-    piped_cmd,
+    pipeline,
     or_cmd,
     and_cmd,
 };
 
-pub const CmdPart = union(CmdPartType) {
+pub const CmdPart = union(CmdPartTag) {
     word: *CmdWord,
     var_assign: *CmdVar,
-    piped_cmd: *Cmd,
+    pipeline: std.ArrayList(*Cmd),
     or_cmd: *Cmd,
     and_cmd: *Cmd,
 };
@@ -41,7 +41,7 @@ pub const CmdWord = struct {
     }
 };
 
-pub const CmdWordPartType = enum {
+pub const CmdWordPartTag = enum {
     literal,
     str,
     variable,
@@ -49,7 +49,7 @@ pub const CmdWordPartType = enum {
     proc_sub,
 };
 
-pub const CmdWordPart = union(CmdWordPartType) {
+pub const CmdWordPart = union(CmdWordPartTag) {
     literal: []u8,
     str: *CmdWordPartStr,
     variable: *CmdWordPartVar,
@@ -69,12 +69,12 @@ pub const CmdWordPartStr = struct {
     }
 };
 
-pub const CmdWordPartStrPartType = enum {
+pub const CmdWordPartStrPartTag = enum {
     literal,
     variable,
 };
 
-pub const CmdWordPartStrPart = union(CmdWordPartStrPartType) {
+pub const CmdWordPartStrPart = union(CmdWordPartStrPartTag) {
     literal: []u8,
     variable: *CmdWordPartVar,
 };

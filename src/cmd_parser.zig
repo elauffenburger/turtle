@@ -378,7 +378,15 @@ pub const CmdParser = struct {
                         break :blk .{ .or_cmd = try self.parse() };
                     }
 
-                    break :blk .{ .piped_cmd = try self.parse() };
+                    var pipeline = std.ArrayList(*cmd.Cmd).init(self.allocator);
+                    try pipeline.append(try self.parse());
+
+                    // Add all subsequent commands in the pipeline.
+                    while (try self.peek(0) == PIPE and try self.peek(1) == PIPE) {
+                        try pipeline.append(try self.parse());
+                    }
+
+                    break :blk .{ .pipeline = pipeline };
                 }
 
                 self.giveup("parse: unexpected char {any}", .{ch});

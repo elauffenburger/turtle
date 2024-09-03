@@ -18,6 +18,12 @@ pub const ParserExecutor = struct {
     pub fn exec(self: *ParserExecutor, line: []u8) !u8 {
         var parser = cmd_parser.CmdParser.init(self.allocator, line);
 
+        const execOpts = cmd_executor.CmdExecutor.ExecOpts{
+            .stdin_fno = std.posix.STDIN_FILENO,
+            .stdout_fno = std.posix.STDOUT_FILENO,
+            .wait = true,
+        };
+
         var lastStatus: u8 = 0;
         while (true) {
             const cmd = parser.parse() catch |err| switch (err) {
@@ -25,7 +31,7 @@ pub const ParserExecutor = struct {
                 else => return err,
             };
 
-            lastStatus = try self.executor.exec(cmd);
+            lastStatus = try self.executor.exec(cmd, execOpts);
         }
 
         return lastStatus;

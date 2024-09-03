@@ -18,39 +18,49 @@ const Error = error{
 pub const CmdExecutor = struct {
     const Self = @This();
 
-    const PipelineCmdInfo = struct {
-        pid: i32,
-        stdin_fno: c_int,
-        stdout_fno: c_int,
-    };
-
-    const PipelineInfo = struct {
-        cmds: std.ArrayList(PipelineCmdInfo),
-        next_stdin: c_int,
-    };
-
     allocator: std.mem.Allocator,
-    vars: std.StringHashMap([]u8),
-    stdin_fno: c_int,
-    stdout_fno: c_int,
-    pipeline: ?*PipelineInfo,
-    last_pid: ?c_int,
 
+    vars: std.StringHashMap([]u8),
+    last_pid: ?c_int,
     exit_status_code: ?u8,
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return .{
             .allocator = allocator,
-            .vars = std.StringHashMap([]u8).init(allocator),
-            .stdin_fno = c.STDIN_FILENO,
-            .stdout_fno = c.STDOUT_FILENO,
-            .pipeline = null,
             .last_pid = null,
+            .vars = std.StringHashMap([]u8).init(allocator),
             .exit_status_code = null,
         };
     }
 
-    pub fn exec(self: *Self, command: *cmd.Cmd) anyerror!u8 {
+    const ExecutableCmdBranch = struct {
+        left: ExecutableCmd,
+        right: ExecutableCmd,
+    };
+
+    const ExecutableCmdTag = enum {
+        normal_cmd,
+        or_cmd,
+        and_cmd,
+        pipeline,
+    };
+
+    const ExecutableCmd = union(ExecutableCmdTag) {
+        normal_cmd: struct {
+            args: std.ArrayList([]u8),
+            env: std.ArrayList([]u8),
+        },
+
+        or_cmd: *ExecutableCmdBranch,
+        and_cmd: *ExecutableCmdBranch,
+
+        pipeline: struct {
+            cmds: std.ArrayList(ExecutableCmd),
+        },
+    };
+
+    // TODO: we should really wait until the last second to perform cmd/proc subs! This is a bit surprising because building a cmd ends up having side effects!
+    pub fn buildExecutableCmd(self: *Self, command: *cmd.Cmd) anyerror!ExecutableCmd {
         var args = std.ArrayList([]u8).init(self.allocator);
         const env = std.ArrayList([]u8).init(self.allocator);
 
@@ -76,140 +86,184 @@ pub const CmdExecutor = struct {
                     try args.append(try self.wordToStr(word));
                 },
 
-                // HACK: we're actually supposed to start up commands in advance of the pipe or else commands that keep the pipe open won't stream properly (because we'll never create the target process).
+                .pipeline => |pipeline_cmds| {
+                    // TODO: check if there are any args/env/vars/etc.; that's probably an error with parsing if so!
 
-                // If we hit a piped cmd, we need to execute _all_ subsequent piped commands as part of the same pipeline.
-                .piped_cmd => |piped_cmd| {
+                    const pipeline = try std.ArrayList(ExecutableCmd).initCapacity(self.allocator, pipeline_cmds.items.len);
+                    for (pipeline_cmds.items, 0..) |pipeline_cmd, pipeline_i| {
+                        pipeline.items[pipeline_i] = try self.buildExecutableCmd(pipeline_cmd);
+                    }
+
+                    return .{
+                        .pipeline = .{
+                            .cmds = pipeline,
+                        },
+                    };
+                },
+
+                .or_cmd => |or_cmd| {
+                    const built_or_cmd = try self.allocator.create(ExecutableCmdBranch);
+                    built_or_cmd.* = .{
+                        .left = .{
+                            .normal_cmd = .{
+                                .args = args,
+                                .env = env,
+                            },
+                        },
+                        .right = try self.buildExecutableCmd(or_cmd),
+                    };
+
+                    return .{ .or_cmd = built_or_cmd };
+                },
+
+                .and_cmd => |and_cmd| {
+                    const built_and_cmd = try self.allocator.create(ExecutableCmdBranch);
+                    built_and_cmd.* = .{
+                        .left = .{
+                            .normal_cmd = .{
+                                .args = args,
+                                .env = env,
+                            },
+                        },
+                        .right = try self.buildExecutableCmd(and_cmd),
+                    };
+
+                    return .{ .and_cmd = built_and_cmd };
+                },
+            }
+        }
+
+        return .{
+            .normal_cmd = .{
+                .args = args,
+                .env = env,
+            },
+        };
+    }
+
+    pub const ExecOpts = struct {
+        stdin_fno: c_int,
+        stdout_fno: c_int,
+        wait: bool,
+    };
+
+    const ExecBuiltCmdResult = union {
+        pid: i32,
+        status: u8,
+    };
+
+    // TODO: clean up memory once we're done.
+    fn execBuiltCmd(self: *Self, command: ExecutableCmd, opts: ExecOpts) anyerror!ExecBuiltCmdResult {
+        switch (command) {
+            .normal_cmd => |normal_cmd| {
+                if (normal_cmd.args.items.len == 0) {
+                    return .{ .status = 0 };
+                }
+
+                const fork_exec_args = ForkExecArgs{
+                    .argv = normal_cmd.args.items,
+                    .envp = normal_cmd.env.items,
+                    .stdin_fno = opts.stdin_fno,
+                    .stdout_fno = opts.stdout_fno,
+                };
+
+                if (opts.wait) {
+                    return .{ .status = try self.forkExec(fork_exec_args) };
+                } else {
+                    return .{ .pid = try self.forkExecNoWait(fork_exec_args) };
+                }
+            },
+            .or_cmd => |or_cmd| {
+                const left_status = try self.execBuiltCmd(or_cmd.left, opts);
+
+                // If the left side succeeded, we're done!
+                if (left_status.status == 0) {
+                    return left_status;
+                }
+
+                // Otherwise, execute the or'd commnd.
+                return try self.execBuiltCmd(or_cmd.right, opts);
+            },
+            .and_cmd => |or_cmd| {
+                const left_status = try self.execBuiltCmd(or_cmd.left, opts);
+
+                // If the left side failed, we're done!
+                if (left_status.status != 0) {
+                    return left_status;
+                }
+
+                // Otherwise, keep going!
+                return try self.execBuiltCmd(or_cmd.right, opts);
+            },
+            .pipeline => |pipeline| {
+                const PipelineCmdInfo = struct {
+                    pid: i32,
+                    stdin_fno: c_int,
+                    stdout_fno: c_int,
+                };
+
+                var pipeline_cmds = std.ArrayList(PipelineCmdInfo).init(self.allocator);
+
+                // Start up each process in the pipeline.
+                var stdin_fno = opts.stdin_fno;
+                for (pipeline.cmds.items) |pipeline_cmd| {
+                    // TODO: make sure we don't have any in-progress args/env/etc. because that would indicate an error with the parsing (since the pipeline cmds should be self-contained).
+
                     // Create a pipe for this part of the pipeline.
                     var pipe_fnos = [2]c_int{ 0, 0 };
                     if (c.pipe(&pipe_fnos) < 0) {
                         self.giveup("pipe failed", .{});
                     }
 
-                    // Figure out what stdin and stdout should be for the left side of the pipe.
-                    const fnos = blk: {
-                        // If we're adding to an existing pipeline:
-                        //   stdin is stdout from the previous command.
-                        //   stdout is the write end of the pipe we created.
-                        if (self.pipeline) |pipeline| {
-                            break :blk [2]c_int{ pipeline.next_stdin, pipe_fnos[1] };
-                        }
-
-                        // If this is the start of a new pipeline:
-                        //   stdin is stdin
-                        //   stdout is the write end of the pipe we created
-                        break :blk [2]c_int{ self.stdin_fno, pipe_fnos[1] };
-                    };
+                    // Read from the previous command (or stdin) and write to the write end of the pipe.
+                    const fnos = [2]c_int{ stdin_fno, pipe_fnos[1] };
 
                     // TODO: create all procs in the pipeline in a separate proc group.
                     // Fork-exec the left side but don't wait for it.
-                    const pid = try self.forkExecNoWait(.{
-                        .argv = args.items,
-                        .envp = env.items,
+                    const exec_result = try self.execBuiltCmd(pipeline_cmd, .{
                         .stdin_fno = fnos[0],
                         .stdout_fno = fnos[1],
+                        .wait = false,
                     });
 
                     const pipeline_cmd_info = PipelineCmdInfo{
-                        .pid = pid,
+                        .pid = exec_result.pid,
                         .stdin_fno = fnos[0],
                         .stdout_fno = fnos[1],
                     };
 
-                    // Init the pipeline if it doesn't already exist.
-                    if (self.pipeline == null) {
-                        self.pipeline = try self.allocator.create(PipelineInfo);
-                        self.pipeline.?.cmds = std.ArrayList(PipelineCmdInfo).init(self.allocator);
-                    }
-
                     // Add the left side of the pipe to the pipeline.
-                    try self.pipeline.?.cmds.append(pipeline_cmd_info);
+                    try pipeline_cmds.append(pipeline_cmd_info);
+
                     // Keep track of the read end of the pipe as stdin for the next command we create in the pipeline.
-                    self.pipeline.?.next_stdin = pipe_fnos[0];
+                    stdin_fno = pipe_fnos[0];
+                }
 
-                    // Execute the right side.
-                    return try self.exec(piped_cmd);
-                },
+                var exit_status: u8 = 0;
+                for (pipeline_cmds.items) |pipeline_cmd| {
+                    const status = Self.wait(pipeline_cmd.pid);
 
-                .or_cmd => |or_cmd| {
-                    const left_status = try self.forkExec(.{
-                        .argv = args.items,
-                        .envp = env.items,
-                        .stdin_fno = self.stdin_fno,
-                        .stdout_fno = self.stdout_fno,
-                    });
-
-                    // If the left side succeeded, we're done!
-                    if (left_status == 0) {
-                        return 0;
+                    // TODO: gracefully clean up other procs.
+                    if (status != 0) {
+                        exit_status = status;
                     }
 
-                    // Otherwise, execute the or'd command.
-                    return try self.exec(or_cmd);
-                },
+                    // Close stdout for cmd to signal to next command that the command has finished writing.
+                    std.posix.close(pipeline_cmd.stdout_fno);
+                }
 
-                .and_cmd => |and_cmd| {
-                    const left_status = try self.forkExec(.{
-                        .argv = args.items,
-                        .envp = env.items,
-                        .stdin_fno = self.stdin_fno,
-                        .stdout_fno = self.stdout_fno,
-                    });
-
-                    // If the left side failed, bail!
-                    if (left_status != 0) {
-                        return left_status;
-                    }
-
-                    // Otherwise, execute the and'd command.
-                    return try self.exec(and_cmd);
-                },
-            }
+                return .{
+                    .status = exit_status,
+                };
+            },
         }
-
-        // If there's an in-progress pipeline, flush it!
-        if (self.pipeline) |_| {
-            _ = try self.waitForPipeline();
-        }
-
-        if (args.items.len == 0) {
-            return 0;
-        }
-
-        return try self.forkExec(.{
-            .argv = args.items,
-            .envp = env.items,
-            .stdin_fno = self.stdin_fno,
-            .stdout_fno = self.stdout_fno,
-        });
     }
 
-    const ExecutionError = error{
-        NoActivePipeline,
-    };
+    pub fn exec(self: *Self, command: *cmd.Cmd, opts: ExecOpts) anyerror!u8 {
+        const built_cmd = try self.buildExecutableCmd(command);
+        const result = try self.execBuiltCmd(built_cmd, opts);
 
-    fn waitForPipeline(self: *Self) !u8 {
-        if (self.pipeline == null) {
-            return ExecutionError.NoActivePipeline;
-        }
-
-        const pipeline = self.pipeline.?;
-
-        defer self.pipeline = null;
-        defer self.allocator.destroy(pipeline);
-        defer pipeline.cmds.clearAndFree();
-
-        var exit_status: u8 = 0;
-        for (pipeline.cmds.items) |pipeline_cmd| {
-            const status = Self.wait(pipeline_cmd.pid);
-
-            // TODO: gracefully clean up other procs.
-            if (status != 0) {
-                exit_status = status;
-            }
-        }
-
-        return exit_status;
+        return result.status;
     }
 
     fn wordToStr(self: *Self, word: *cmd.CmdWord) anyerror![]u8 {
@@ -259,17 +313,17 @@ pub const CmdExecutor = struct {
                 },
 
                 .cmd_sub => |cmd_sub| {
-                    const original_fnos = [_]c_int{ self.stdin_fno, self.stdout_fno };
-
                     var pipe_fnos = [2]c_int{ 0, 0 };
                     if (c.pipe(&pipe_fnos) < 0) {
                         self.giveup("wordToStr: pipe failed", .{});
                     }
 
                     // Write to the write end of the pipe while executing the cmd.
-                    self.stdout_fno = pipe_fnos[1];
-                    const status = try self.exec(cmd_sub);
-                    self.stdout_fno = original_fnos[1];
+                    const status = try self.exec(cmd_sub, .{
+                        .stdin_fno = std.posix.STDIN_FILENO,
+                        .stdout_fno = pipe_fnos[1],
+                        .wait = true,
+                    });
 
                     // Signal that we're done writing.
                     _ = c.close(pipe_fnos[1]);
@@ -323,12 +377,12 @@ pub const CmdExecutor = struct {
                         self.giveup("wordToStr: proc sub file chmod failed", .{});
                     }
 
-                    const original_out_fd = self.stdout_fno;
-
                     // Write to the file during execution.
-                    self.stdout_fno = fd;
-                    const maybeStatus = self.exec(proc_sub);
-                    self.stdout_fno = original_out_fd;
+                    const maybeStatus = self.exec(proc_sub, .{
+                        .stdin_fno = std.posix.STDIN_FILENO,
+                        .stdout_fno = fd,
+                        .wait = true,
+                    });
 
                     // Signal that we're done writing to the file.
                     _ = c.close(fd);
