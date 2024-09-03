@@ -234,14 +234,6 @@ pub const CmdExecutor = struct {
                         .wait = false,
                     });
 
-                    // Close the fnos we created for this process so we don't pass them onto future children in the pipeline.
-                    if (fnos[0] != opts.stdin_fno) {
-                        _ = c.close(fnos[0]);
-                    }
-                    if (fnos[1] != opts.stdout_fno) {
-                        _ = c.close(fnos[1]);
-                    }
-
                     const pipeline_cmd_info = PipelineCmdInfo{
                         .pid = exec_result.pid,
                         .stdin_fno = fnos[0],

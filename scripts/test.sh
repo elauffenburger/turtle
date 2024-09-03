@@ -100,7 +100,13 @@ main() {
 tests() {
     t 'vars' 'FOO=bar; echo $FOO'
     t 'vars - env (ignored)' 'FOO=bar echo $FOO'
+    t 'vars - proc sub' 'FOO=<(echo foo bar) echo $FOO'
+    t 'vars - command sub' 'FOO=$(echo foo bar) echo $FOO'
     t 'pipes' 'echo world | sed "s/o/a/"'
+    t 'pipes - with ||' 'echo world | sed "s/o/a/" || true'
+    t 'pipes - with &&' 'echo world | sed "s/o/a/" && true'
+    t 'pipes - with || - pre' 'true || echo world | sed "s/o/a/"'
+    t 'pipes - with && - pre' 'true && echo world | sed "s/o/a/"'
     t 'comments' 'echo foo bar baz #foo bar'
     t 'command sub' 'echo $(echo foo) $(echo bar)'
     t 'proc sub' 'cat <(echo foo bar)'
@@ -110,7 +116,11 @@ tests() {
     t 'or - true' 'true || echo foo'
     t 'or - false' 'false || echo foo'
     t 'dot source' '. <(echo "echo foo")'
-    t 'strings' 'echo "foo"'
+    t 'strings - raw' 'echo foo bar baz'
+    t 'strings - single quote' $'echo \'foo bar\' baz'
+    t 'strings - single quote - vars' $'FOO=foo; echo \'$FOO bar\' baz'
+    t 'strings - double quote' 'echo "foo bar" baz'
+    t 'strings - single quote - vars' $'FOO=foo; echo "$FOO bar" baz'
 
     echo 'done!'
 }
