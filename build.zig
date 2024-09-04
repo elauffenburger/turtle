@@ -1,4 +1,4 @@
-const Build = @import("std").Build;
+const std = @import("std");
 
 const c_flags = [_][]const u8{
     "-Werror",
@@ -23,18 +23,20 @@ const c_flags = [_][]const u8{
     "-Wno-error=switch-enum",
 };
 
-pub fn build(b: *Build) !void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    var turtle = b.addExecutable(.{
+
+    var cli = b.addExecutable(.{
         .name = "turtle",
         .root_source_file = b.path("./src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
-    turtle.linkSystemLibrary("glib-2.0");
-    turtle.linkSystemLibrary("readline");
-    turtle.linkLibC();
 
-    b.installArtifact(turtle);
+    cli.linkSystemLibrary("glib-2.0");
+    cli.linkSystemLibrary("readline");
+
+    b.installArtifact(cli);
 }

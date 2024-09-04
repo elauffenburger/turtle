@@ -1,14 +1,16 @@
 const std = @import("std");
 const cmd = @import("cmd.zig");
 
-const STR_SINGLE_QUOTE = '\'';
-const STR_DOUBLE_QUOTE = '"';
-const VAR_EXPAND_START = '$';
-const VAR_ASSIGN = '=';
-const PIPE = '|';
-const COMMENT = '#';
+pub usingnamespace cmd;
 
-pub const Error = error{
+pub const STR_SINGLE_QUOTE = '\'';
+pub const STR_DOUBLE_QUOTE = '"';
+pub const VAR_EXPAND_START = '$';
+pub const VAR_ASSIGN = '=';
+pub const PIPE = '|';
+pub const COMMENT = '#';
+
+pub const ParseError = error{
     EOF,
 };
 
@@ -72,7 +74,7 @@ pub const CmdParser = struct {
     ///
     /// The cursor will be placed after at the last character of the literal
     /// (e.g. "foo" will be returned and cursor will be at ' ' in "foo bar").
-    fn parseWordLiteral(self: *Self) Error![]u8 {
+    fn parseWordLiteral(self: *Self) ParseError![]u8 {
         // Keep track of how many characters past the head of buf we've looked.
         //
         // We'll use this to construct the name and actually update the buf later.
@@ -91,7 +93,7 @@ pub const CmdParser = struct {
 
             // If this isn't a literal character, then report an error.
             if (!isLiteralChar(ch)) {
-                self.giveup("parseWordLiteral: unexpected character {any}", .{ch});
+                giveup("parseWordLiteral: unexpected character {any}", .{ch});
             }
 
             i += 1;
@@ -155,12 +157,12 @@ pub const CmdParser = struct {
     fn parseSub(self: *Self) anyerror!*cmd.Cmd {
         const subPrefix = try self.curr();
         if (!(subPrefix == '$' or subPrefix == '<')) {
-            self.giveup("parseSub: unexpected char in cmd sub: {any}", .{subPrefix});
+            giveup("parseSub: unexpected char in cmd sub: {any}", .{subPrefix});
         }
 
         const openingBrace = try self.next();
         if (openingBrace != '(') {
-            self.giveup("parseSub: unexpected char in cmd sub: {any}", .{openingBrace});
+            giveup("parseSub: unexpected char in cmd sub: {any}", .{openingBrace});
         }
 
         // Set up the sub_parser to start on the first character of the subexpr.
@@ -199,7 +201,7 @@ pub const CmdParser = struct {
                 const part = @unionInit(cmd.CmdWordPartStrPart, "variable", try self.parseVarExpand());
                 try res.parts.append(part);
             } else {
-                self.giveup("parseStrExpandable: unexpected char: {any}", .{ch});
+                giveup("parseStrExpandable: unexpected char: {any}", .{ch});
             }
 
             ch = self.curr() catch break;
@@ -222,7 +224,7 @@ pub const CmdParser = struct {
                 return self.parseStrExpandable();
             },
             else => {
-                self.giveup("parseStr: unexpected char in string: {any}", .{ch});
+                giveup("parseStr: unexpected char in string: {any}", .{ch});
                 unreachable;
             },
         }
@@ -280,7 +282,7 @@ pub const CmdParser = struct {
                         .variable = try self.parseVarExpand(),
                     };
                 } else {
-                    self.giveup("parseWord: unexpected character: {c}", .{ch});
+                    giveup("parseWord: unexpected character: {c}", .{ch});
                 }
             };
 
@@ -374,7 +376,7 @@ pub const CmdParser = struct {
                     try res.parts.append(.{ .and_cmd = try self.parse() });
                     continue;
                 } else {
-                    self.giveup("parse: background procs not implemented", .{});
+                    giveup("parse: background procs not implemented", .{});
                 }
             }
 
@@ -441,7 +443,7 @@ pub const CmdParser = struct {
                 continue;
             }
 
-            self.giveup("parse: unexpected char {any}", .{ch});
+            giveup("parse: unexpected char {any}", .{ch});
             unreachable;
         }
 
@@ -463,14 +465,14 @@ pub const CmdParser = struct {
         }
     }
 
-    fn next(self: *Self) Error!u8 {
+    fn next(self: *Self) ParseError!u8 {
         const new_offset = self.buf_offset + 1;
 
         // Always set the offset to the new offset so we can detect if we're at the EOF after this call.
         self.buf_offset = new_offset;
 
         if (new_offset >= self.buf.len) {
-            return Error.EOF;
+            return ParseError.EOF;
         }
 
         return self.buf[self.buf_offset];
@@ -481,7 +483,7 @@ pub const CmdParser = struct {
     /// Notes:
     ///   - The result will contain the current character.
     ///   - n will be clamped so that the returned slice never exceeds the length of the buffer.
-    fn take(self: *Self, n: usize) Error![]u8 {
+    fn take(self: *Self, n: usize) ParseError![]u8 {
         var newOffset = self.buf_offset + n;
         if (newOffset >= self.buf.len) {
             newOffset = self.buf.len;
@@ -493,53 +495,53 @@ pub const CmdParser = struct {
         return result;
     }
 
-    fn curr(self: Self) Error!u8 {
+    fn curr(self: Self) ParseError!u8 {
         return self.peek(0);
     }
 
-    fn peek(self: Self, offset: usize) Error!u8 {
+    fn peek(self: Self, offset: usize) ParseError!u8 {
         const effectiveOffset = self.buf_offset + offset;
 
         if (effectiveOffset >= 0 and effectiveOffset < self.buf.len) {
             return self.buf[effectiveOffset];
         } else {
-            return Error.EOF;
+            return ParseError.EOF;
         }
-    }
-
-    fn giveup(_: *Self, comptime fmt: []const u8, args: anytype) noreturn {
-        std.log.err(fmt, args);
-        std.posix.exit(1);
     }
 };
 
-inline fn isAlpha(ch: u8) bool {
+pub inline fn isAlpha(ch: u8) bool {
     return (ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z');
 }
 
-inline fn isNumeric(ch: u8) bool {
+pub inline fn isNumeric(ch: u8) bool {
     return ch >= 48 and ch <= 57;
 }
 
-inline fn isLiteralChar(ch: u8) bool {
+pub inline fn isLiteralChar(ch: u8) bool {
     return !(ch == ' ' or ch == '\n' or ch == '$' or ch == '`' or ch == '<' or
         ch == '>' or ch == '&' or ch == STR_DOUBLE_QUOTE or ch == STR_SINGLE_QUOTE or
         ch == PIPE or ch == ';');
 }
 
-inline fn isVarNameChar(ch: u8) bool {
+pub inline fn isVarNameChar(ch: u8) bool {
     return isAlpha(ch) or isNumeric(ch) or ch == '_';
 }
 
-inline fn isEndOfLine(ch: u8) bool {
+pub inline fn isEndOfLine(ch: u8) bool {
     return ch == '\n' or ch == 0;
 }
 
-fn isNonExpandableStrLitChar(ch: u8) bool {
+pub fn isNonExpandableStrLitChar(ch: u8) bool {
     return ch != STR_SINGLE_QUOTE;
 }
 
 // TODO: should `\n` be included; strings can span lines!
-fn isExpandableStrLitChar(ch: u8) bool {
+pub fn isExpandableStrLitChar(ch: u8) bool {
     return isLiteralChar(ch) or ch == ' ' or ch == ';';
+}
+
+pub fn giveup(comptime fmt: []const u8, args: anytype) noreturn {
+    std.log.err(fmt, args);
+    std.posix.exit(1);
 }
