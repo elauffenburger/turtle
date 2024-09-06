@@ -65,3 +65,10 @@ fn replaceFd(old: c_int, new: c_int) void {
     _ = c.dup2(old, new);
     _ = c.close(old);
 }
+
+fn sigIgnore(_: c_int) callconv(.C) void {}
+
+pub fn waitForDebugger() void {
+    _ = c.signal(1, sigIgnore);
+    _ = c.sleep(10);
+}

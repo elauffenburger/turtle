@@ -22,12 +22,12 @@ t() {
     TEMP_FILE=$(mktemp)
     echo "$*" >"$TEMP_FILE"
 
-    EXPECTED_WITH_TIME=$(/usr/bin/env bash -c "time /usr/bin/env bash <(cat $TEMP_FILE)" 2>&1)
+    EXPECTED_WITH_TIME=$(bash -c "time bash <(cat $TEMP_FILE)" 2>&1)
     EXPECTED=$(ghead -n -3 <<<"$EXPECTED_WITH_TIME")
     EXPECTED_TIME=$(gtail -n -3 <<<"$EXPECTED_WITH_TIME" | tr '\n' ' ')
     EXPECTED_EXIT_CODE="$?"
 
-    ACTUAL_WITH_TIME=$(/usr/bin/env bash -c "time $TURTLE_BIN <(cat $TEMP_FILE)" 2>&1)
+    ACTUAL_WITH_TIME=$(bash -c "time $TURTLE_BIN <(cat $TEMP_FILE)" 2>&1)
     ACTUAL=$(ghead -n -3 <<<"$ACTUAL_WITH_TIME")
     ACTUAL_TIME=$(gtail -n -3 <<<"$ACTUAL_WITH_TIME" | tr '\n' ' ')
     ACTUAL_EXIT_CODE="$?"

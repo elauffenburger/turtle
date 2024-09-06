@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 
 const cmd = @import("../parser/cmd.zig");
 
@@ -373,76 +374,86 @@ pub const CmdExecutor = struct {
     }
 
     fn runPipeline(self: *Self, pipeline: ExecutableCmd.Pipeline, opts: ExecOpts) !ExecBuiltCmdResult {
-        const PipelineProcInfo = struct {
-            pid: i32,
-            stdin_fno: c_int,
-            stdout_fno: c_int,
-        };
+        const pid = c.fork();
+        assert(pid != -1);
+        if (pid == 0) {
+            _ = c.setpgid(0, 0);
 
-        var pipeline_procs = std.ArrayList(PipelineProcInfo).init(self.allocator);
+            const PipelineProcInfo = struct {
+                pid: i32,
+                stdin_fno: c_int,
+                stdout_fno: c_int,
+            };
 
-        // Start up each process in the pipeline.
-        var prev_stdin_fno = opts.stdin_fno;
-        for (pipeline.cmds.items, 0..) |pipeline_cmd, i| {
-            const is_last_pipeline_proc = i == pipeline.cmds.items.len - 1;
+            var pipeline_procs = std.ArrayList(PipelineProcInfo).init(self.allocator);
 
-            // TODO: make sure we don't have any in-progress args/env/etc. because that would indicate an error with the parsing (since the pipeline cmds should be self-contained).
+            // Start up each process in the pipeline.
+            var prev_stdin_fno = opts.stdin_fno;
+            for (pipeline.cmds.items, 0..) |pipeline_cmd, i| {
+                const is_last_pipeline_proc = i == pipeline.cmds.items.len - 1;
 
-            // Figure out what our fnos should be.
-            //
-            // If this is the last command in the pipeline, use the previous stdin fno, but output directly to stdout.
-            // Otherwise, allocate a pipe we'll use to pipe output between procs.
-            var fnos: [2]c_int = undefined;
-            if (is_last_pipeline_proc) {
-                fnos = .{ prev_stdin_fno, opts.stdout_fno };
-            } else {
-                var pipe_fnos = [2]c_int{ 0, 0 };
-                _ = c.pipe(&pipe_fnos);
+                // TODO: make sure we don't have any in-progress args/env/etc. because that would indicate an error with the parsing (since the pipeline cmds should be self-contained).
 
-                fnos = .{ prev_stdin_fno, pipe_fnos[1] };
+                // Figure out what our fnos should be.
+                //
+                // If this is the last command in the pipeline, use the previous stdin fno, but output directly to stdout.
+                // Otherwise, allocate a pipe we'll use to pipe output between procs.
+                var fnos: [2]c_int = undefined;
+                if (is_last_pipeline_proc) {
+                    fnos = .{ prev_stdin_fno, opts.stdout_fno };
+                } else {
+                    var pipe_fnos = [2]c_int{ 0, 0 };
+                    _ = c.pipe(&pipe_fnos);
 
-                // Save the read end for the next pipeline proc.
-                prev_stdin_fno = pipe_fnos[0];
-            }
+                    fnos = .{ prev_stdin_fno, pipe_fnos[1] };
 
-            // TODO: create all procs in the pipeline in a separate proc group.
-            // Fork-exec the left side but don't wait for it.
-            const exec_result = try self.execBuiltCmd(pipeline_cmd, .{
-                .stdin_fno = fnos[0],
-                .stdout_fno = fnos[1],
-                .wait = false,
-            });
-
-            _ = c.close(fnos[0]);
-            _ = c.close(fnos[1]);
-
-            // Add the left side of the pipe to the pipeline.
-            try pipeline_procs.append(.{
-                .pid = exec_result.pid,
-                .stdin_fno = fnos[0],
-                .stdout_fno = fnos[1],
-            });
-        }
-
-        // Close the last stdin fno.
-        _ = c.close(prev_stdin_fno);
-
-        var exit_status: u8 = 0;
-        for (pipeline_procs.items, 0..) |pipeline_proc, i| {
-            const status = proc.wait(pipeline_proc.pid);
-
-            // If this proc failed, kill the rest of the procs in the pipeline and bail.
-            if (status != 0) {
-                for (pipeline_procs.items[i + 1 ..]) |next_cmd| {
-                    _ = c.kill(next_cmd.pid, c.SIGKILL);
+                    // Save the read end for the next pipeline proc.
+                    prev_stdin_fno = pipe_fnos[0];
                 }
 
-                exit_status = status;
-                break;
+                // Fork-exec the left side but don't wait for it.
+                const exec_result = try self.execBuiltCmd(pipeline_cmd, .{
+                    .stdin_fno = fnos[0],
+                    .stdout_fno = fnos[1],
+                    .wait = false,
+                });
+
+                _ = c.close(fnos[0]);
+                _ = c.close(fnos[1]);
+
+                // Add the left side of the pipe to the pipeline.
+                try pipeline_procs.append(.{
+                    .pid = exec_result.pid,
+                    .stdin_fno = fnos[0],
+                    .stdout_fno = fnos[1],
+                });
             }
+
+            // Close the last stdin fno.
+            _ = c.close(prev_stdin_fno);
+
+            var exit_status: u8 = 0;
+            for (pipeline_procs.items, 0..) |pipeline_proc, i| {
+                const status = proc.wait(pipeline_proc.pid);
+
+                // If this proc failed, kill the rest of the procs in the pipeline and bail.
+                if (status != 0) {
+                    for (pipeline_procs.items[i + 1 ..]) |next_cmd| {
+                        _ = c.kill(next_cmd.pid, c.SIGKILL);
+                    }
+
+                    exit_status = status;
+                    break;
+                }
+            }
+
+            std.posix.exit(exit_status);
         }
 
-        return .{ .status = exit_status };
+        const status = proc.wait(pid);
+        return .{
+            .status = status,
+        };
     }
 
     fn exitErr(self: *Self, status: u8) noreturn {

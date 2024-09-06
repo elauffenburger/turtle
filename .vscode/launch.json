@@ -1,48 +1,48 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "(lldb) Debug Builder",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${input:detectedBuildProgramDir}",
-            "args": [
-                "/opt/homebrew/bin/zig",
-                ".",
-                "zig-cache",
-                "zig-cache"
-            ],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "externalConsole": false,
-            "MIMode": "lldb"
-        },
-        {
-            "name": "(lldb) Launch",
-            "cwd": "${workspaceFolder}",
-            "type": "cppdbg",
-            "request": "launch",
-            "args": [
-                "-c",
-                "echo \"foo\" | sed 's/f/g/' | cat"
-            ],
-            "program": "${workspaceFolder}/zig-out/bin/turtle",
-            "MIMode": "lldb",
-            "preLaunchTask": "build"
-        },
-    ],
-    "inputs": [
-        {
-            "id": "detectedBuildProgramDir",
-            "type": "command",
-            "command": "shellCommand.execute",
-            "args": {
-                "command": "find ${workspaceFolder} -type file -name build | head -n 1"
-            }
-        },
-    ]
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "(lldb) Debug Builder",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${input:detectedBuildProgramDir}",
+      "args": ["/opt/homebrew/bin/zig", ".", "zig-cache", "zig-cache"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "lldb"
+    },
+    {
+      "name": "(lldb) Launch",
+      "cwd": "${workspaceFolder}",
+      "type": "cppdbg",
+      "request": "launch",
+      "args": ["-c", "echo \"foo\" | sed 's/f/g/' | cat"],
+      "program": "${workspaceFolder}/zig-out/bin/turtle",
+      "MIMode": "lldb",
+      "preLaunchTask": "build"
+    },
+    {
+      "name": "(lldb) attach",
+      "type": "cppdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}",
+      "program": "${workspaceFolder}/zig-out/bin/turtle",
+      "MIMode": "lldb"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "detectedBuildProgramDir",
+      "type": "command",
+      "command": "shellCommand.execute",
+      "args": {
+        "command": "find ${workspaceFolder} -type file -name build | head -n 1"
+      }
+    }
+  ]
 }
