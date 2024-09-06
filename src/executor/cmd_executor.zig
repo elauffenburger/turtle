@@ -310,14 +310,14 @@ pub const CmdExecutor = struct {
             return try std.fmt.allocPrint(self.allocator, "{d}", .{self.last_status_code.?});
         }
 
-        // CHeck if we have a var def for the command.
+        // Check if we have a var def for the command.
         var value = self.vars.get(name);
         if (value == null) {
             // Fall back to the environment.
             const envVal = std.posix.getenv(name);
             if (envVal != null) {
-                const buf = try self.allocator.alloc(u8, envVal.?.len - 1);
-                @memcpy(buf, envVal.?[0 .. envVal.?.len - 1]);
+                const buf = try self.allocator.alloc(u8, envVal.?.len);
+                @memcpy(buf, envVal.?[0..envVal.?.len]);
 
                 value = buf;
             }
