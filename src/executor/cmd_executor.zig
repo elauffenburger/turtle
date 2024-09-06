@@ -12,35 +12,32 @@ pub const ExecOpts = struct {
     wait: bool,
 };
 
-const ExecBuiltCmdResult = union {
+const ExecBuiltCmdResult = union(enum) {
     pid: i32,
     status: u8,
 };
 
-const ExecutableCmdBranch = struct {
-    left: ExecutableCmd,
-    right: ExecutableCmd,
-};
-
-const ExecutableCmdTag = enum {
-    normal_cmd,
-    or_cmd,
-    and_cmd,
-    pipeline,
-};
-
-const ExecutableCmd = union(ExecutableCmdTag) {
-    normal_cmd: struct {
+const ExecutableCmd = union(enum) {
+    const Normal = struct {
         args: std.ArrayList([]u8),
         env: std.ArrayList([]u8),
-    },
+    };
 
-    or_cmd: *ExecutableCmdBranch,
-    and_cmd: *ExecutableCmdBranch,
+    const Branch = struct {
+        left: ExecutableCmd,
+        right: ExecutableCmd,
+    };
 
-    pipeline: struct {
+    const Pipeline = struct {
         cmds: std.ArrayList(ExecutableCmd),
-    },
+    };
+
+    normal_cmd: Normal,
+
+    or_cmd: *Branch,
+    and_cmd: *Branch,
+
+    pipeline: Pipeline,
 };
 
 pub const CmdExecutor = struct {
@@ -120,7 +117,7 @@ pub const CmdExecutor = struct {
                 },
 
                 .or_cmd => |or_cmd| {
-                    const built_or_cmd = try self.allocator.create(ExecutableCmdBranch);
+                    const built_or_cmd = try self.allocator.create(ExecutableCmd.Branch);
                     built_or_cmd.* = .{
                         .left = .{
                             .normal_cmd = .{
@@ -135,7 +132,7 @@ pub const CmdExecutor = struct {
                 },
 
                 .and_cmd => |and_cmd| {
-                    const built_and_cmd = try self.allocator.create(ExecutableCmdBranch);
+                    const built_and_cmd = try self.allocator.create(ExecutableCmd.Branch);
                     built_and_cmd.* = .{
                         .left = .{
                             .normal_cmd = .{
@@ -370,78 +367,82 @@ pub const CmdExecutor = struct {
                 return try self.execBuiltCmd(or_cmd.right, opts);
             },
             .pipeline => |pipeline| {
-                const PipelineProcInfo = struct {
-                    pid: i32,
-                    stdin_fno: c_int,
-                    stdout_fno: c_int,
-                };
-
-                var pipeline_procs = std.ArrayList(PipelineProcInfo).init(self.allocator);
-
-                // Start up each process in the pipeline.
-                var prev_stdin_fno = opts.stdin_fno;
-                for (pipeline.cmds.items, 0..) |pipeline_cmd, i| {
-                    const is_last_pipeline_proc = i == pipeline.cmds.items.len - 1;
-
-                    // TODO: make sure we don't have any in-progress args/env/etc. because that would indicate an error with the parsing (since the pipeline cmds should be self-contained).
-
-                    // Figure out what our fnos should be.
-                    //
-                    // If this is the last command in the pipeline, use the previous stdin fno, but output directly to stdout.
-                    // Otherwise, allocate a pipe we'll use to pipe output between procs.
-                    var fnos: [2]c_int = undefined;
-                    if (is_last_pipeline_proc) {
-                        fnos = .{ prev_stdin_fno, opts.stdout_fno };
-                    } else {
-                        var pipe_fnos = [2]c_int{ 0, 0 };
-                        _ = c.pipe(&pipe_fnos);
-
-                        fnos = .{ prev_stdin_fno, pipe_fnos[1] };
-
-                        // Save the read end for the next pipeline proc.
-                        prev_stdin_fno = pipe_fnos[0];
-                    }
-
-                    // TODO: create all procs in the pipeline in a separate proc group.
-                    // Fork-exec the left side but don't wait for it.
-                    const exec_result = try self.execBuiltCmd(pipeline_cmd, .{
-                        .stdin_fno = fnos[0],
-                        .stdout_fno = fnos[1],
-                        .wait = false,
-                    });
-
-                    _ = c.close(fnos[0]);
-                    _ = c.close(fnos[1]);
-
-                    // Add the left side of the pipe to the pipeline.
-                    try pipeline_procs.append(.{
-                        .pid = exec_result.pid,
-                        .stdin_fno = fnos[0],
-                        .stdout_fno = fnos[1],
-                    });
-                }
-
-                // Close the last stdin fno.
-                _ = c.close(prev_stdin_fno);
-
-                var exit_status: u8 = 0;
-                for (pipeline_procs.items, 0..) |pipeline_proc, i| {
-                    const status = proc.wait(pipeline_proc.pid);
-
-                    // If this proc failed, kill the rest of the procs in the pipeline and bail.
-                    if (status != 0) {
-                        for (pipeline_procs.items[i + 1 ..]) |next_cmd| {
-                            _ = c.kill(next_cmd.pid, c.SIGKILL);
-                        }
-
-                        exit_status = status;
-                        break;
-                    }
-                }
-
-                return .{ .status = exit_status };
+                return try self.runPipeline(pipeline, opts);
             },
         }
+    }
+
+    fn runPipeline(self: *Self, pipeline: ExecutableCmd.Pipeline, opts: ExecOpts) !ExecBuiltCmdResult {
+        const PipelineProcInfo = struct {
+            pid: i32,
+            stdin_fno: c_int,
+            stdout_fno: c_int,
+        };
+
+        var pipeline_procs = std.ArrayList(PipelineProcInfo).init(self.allocator);
+
+        // Start up each process in the pipeline.
+        var prev_stdin_fno = opts.stdin_fno;
+        for (pipeline.cmds.items, 0..) |pipeline_cmd, i| {
+            const is_last_pipeline_proc = i == pipeline.cmds.items.len - 1;
+
+            // TODO: make sure we don't have any in-progress args/env/etc. because that would indicate an error with the parsing (since the pipeline cmds should be self-contained).
+
+            // Figure out what our fnos should be.
+            //
+            // If this is the last command in the pipeline, use the previous stdin fno, but output directly to stdout.
+            // Otherwise, allocate a pipe we'll use to pipe output between procs.
+            var fnos: [2]c_int = undefined;
+            if (is_last_pipeline_proc) {
+                fnos = .{ prev_stdin_fno, opts.stdout_fno };
+            } else {
+                var pipe_fnos = [2]c_int{ 0, 0 };
+                _ = c.pipe(&pipe_fnos);
+
+                fnos = .{ prev_stdin_fno, pipe_fnos[1] };
+
+                // Save the read end for the next pipeline proc.
+                prev_stdin_fno = pipe_fnos[0];
+            }
+
+            // TODO: create all procs in the pipeline in a separate proc group.
+            // Fork-exec the left side but don't wait for it.
+            const exec_result = try self.execBuiltCmd(pipeline_cmd, .{
+                .stdin_fno = fnos[0],
+                .stdout_fno = fnos[1],
+                .wait = false,
+            });
+
+            _ = c.close(fnos[0]);
+            _ = c.close(fnos[1]);
+
+            // Add the left side of the pipe to the pipeline.
+            try pipeline_procs.append(.{
+                .pid = exec_result.pid,
+                .stdin_fno = fnos[0],
+                .stdout_fno = fnos[1],
+            });
+        }
+
+        // Close the last stdin fno.
+        _ = c.close(prev_stdin_fno);
+
+        var exit_status: u8 = 0;
+        for (pipeline_procs.items, 0..) |pipeline_proc, i| {
+            const status = proc.wait(pipeline_proc.pid);
+
+            // If this proc failed, kill the rest of the procs in the pipeline and bail.
+            if (status != 0) {
+                for (pipeline_procs.items[i + 1 ..]) |next_cmd| {
+                    _ = c.kill(next_cmd.pid, c.SIGKILL);
+                }
+
+                exit_status = status;
+                break;
+            }
+        }
+
+        return .{ .status = exit_status };
     }
 
     fn exitErr(self: *Self, status: u8) noreturn {
