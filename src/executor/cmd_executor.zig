@@ -50,30 +50,31 @@ pub const CmdExecutor = struct {
 
     vars: std.StringHashMap([]u8),
     last_pid: ?c_int,
+    last_status_code: ?u8,
 
-    exit_jmp_buf: ?c.jmp_buf,
-    exit_status_code: ?u8,
+    err_jmp_buf: ?c.jmp_buf,
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return .{
             .allocator = allocator,
             .last_pid = null,
+            .last_status_code = null,
             .vars = std.StringHashMap([]u8).init(allocator),
-            .exit_jmp_buf = null,
-            .exit_status_code = null,
+            .err_jmp_buf = null,
         };
     }
 
     pub fn exec(self: *Self, command: *cmd.Cmd, opts: ExecOpts) anyerror!u8 {
-        self.exit_jmp_buf = [_]c_int{0} ** 48;
-        if (c.setjmp(&self.exit_jmp_buf.?) != 0) {
-            return self.exit_status_code.?;
+        self.err_jmp_buf = [_]c_int{0} ** 48;
+        if (c.setjmp(&self.err_jmp_buf.?) != 0) {
+            return self.last_status_code.?;
         }
 
         const built_cmd = try self.buildExecutableCmd(command);
         const result = try self.execBuiltCmd(built_cmd, opts);
 
-        return result.status;
+        self.last_status_code = result.status;
+        return self.last_status_code.?;
     }
 
     // TODO: we should really wait until the last second to perform cmd/proc subs! This is a bit surprising because building a cmd ends up having side effects!
@@ -305,6 +306,9 @@ pub const CmdExecutor = struct {
         if (std.mem.eql(u8, "!", name)) {
             return try std.fmt.allocPrint(self.allocator, "{d}", .{self.last_pid.?});
         }
+        if (std.mem.eql(u8, "?", name)) {
+            return try std.fmt.allocPrint(self.allocator, "{d}", .{self.last_status_code.?});
+        }
 
         // CHeck if we have a var def for the command.
         var value = self.vars.get(name);
@@ -441,8 +445,8 @@ pub const CmdExecutor = struct {
     }
 
     fn exitErr(self: *Self, status: u8) noreturn {
-        self.exit_status_code = status;
-        c.longjmp(&self.exit_jmp_buf.?, status);
+        self.last_status_code = status;
+        c.longjmp(&self.err_jmp_buf.?, status);
         unreachable;
     }
 };

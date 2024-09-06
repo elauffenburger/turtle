@@ -46,38 +46,29 @@ fn emain() !void {
 
     if (args.cmd_str) |cmd_str| {
         const status = try parser_executor.exec(cmd_str);
-        if (status != 0) {
-            std.posix.exit(status);
-        }
-
-        return;
+        std.posix.exit(status);
     }
 
-    try interactive(&parser_executor);
+    try interactive(allocator, &parser_executor);
 }
 
-fn interactive(parser_executor: *ParserExecutor) !void {
-    var line: ?[*:0]u8 = null;
+fn interactive(allocator: std.mem.Allocator, parser_executor: *ParserExecutor) !void {
     while (true) {
-        if (line != null) {
-            std.c.free(line);
-            line = null;
+        const line_ptr = c.readline("🐢> ");
+        const line = mem.span(line_ptr);
+
+        if (!mem.eql(u8, line, "")) {
+            _ = c.add_history(line_ptr);
         }
 
-        line = c.readline("🐢> ");
-        {
-            if (line == null) {
-                break;
-            }
-            const line_slice = mem.span(line.?);
-            if (!mem.eql(u8, line_slice, "")) {
-                _ = c.add_history(line.?);
-            }
-        }
+        _ = parser_executor.exec(line) catch {
+            const buf = std.fmt.allocPrint(allocator, "critical error executing command:\n===\n{s}===\n", .{line}) catch std.posix.exit(1);
+            defer allocator.free(buf);
 
-        const status = try parser_executor.exec(mem.span(line.?));
-        if (status != 0) {
-            std.posix.exit(status);
-        }
+            try std.io.getStdErr().writeAll(buf);
+            continue;
+        };
+
+        std.c.free(line_ptr);
     }
 }
