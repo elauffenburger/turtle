@@ -383,6 +383,7 @@ pub const CmdParser = struct {
             if (ch == PIPE) {
                 self.can_set_vars = true;
 
+                // Look ahead to see if this is a pipe; if it is, then we're about to hit an '||'.
                 ch = try self.peek(1);
                 if (ch == PIPE) {
                     // If we're currently in a pipeline, return the command we've built so far and mark that we've reached the end of the pipeline.
@@ -391,13 +392,16 @@ pub const CmdParser = struct {
                         return res;
                     }
 
+                    // Otherwise, chomp the second '|' in '||' and move to the next character to prepare for the next parse.
                     _ = try self.next();
                     _ = try self.next();
 
+                    // Parse the next command and put it in an "or".
                     try res.parts.append(.{ .or_cmd = try self.parse() });
                     continue;
                 }
 
+                // Move ahead to the next character now that we know we're not in an '||'.
                 _ = try self.next();
 
                 // If we're currently in a pipeline, return the command we've built so far so we can add it to the pipeline.
