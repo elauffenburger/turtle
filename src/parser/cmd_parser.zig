@@ -383,7 +383,7 @@ pub const CmdParser = struct {
             if (ch == PIPE) {
                 self.can_set_vars = true;
 
-                ch = try self.next();
+                ch = try self.peek(1);
                 if (ch == PIPE) {
                     // If we're currently in a pipeline, return the command we've built so far and mark that we've reached the end of the pipeline.
                     if (self.in_pipeline) {
@@ -392,10 +392,13 @@ pub const CmdParser = struct {
                     }
 
                     _ = try self.next();
+                    _ = try self.next();
 
                     try res.parts.append(.{ .or_cmd = try self.parse() });
                     continue;
                 }
+
+                _ = try self.next();
 
                 // If we're currently in a pipeline, return the command we've built so far so we can add it to the pipeline.
                 if (self.in_pipeline) {
@@ -424,20 +427,15 @@ pub const CmdParser = struct {
                         break;
                     };
 
-                    // If we've exited the pipeline, then we're done; add the pipeline part and then
-                    // add all the parts of the command we just parsed and continue.
+                    // Add the command to the pipeline.
+                    try pipeline.append(next_cmd);
+
+                    // If we've exited the pipeline, then we're done!
                     if (!self.in_pipeline) {
                         try res.parts.append(.{ .pipeline = pipeline });
 
-                        for (next_cmd.parts.items) |part| {
-                            try res.parts.append(part);
-                        }
-
-                        continue;
+                        break;
                     }
-
-                    // Otherwise, just add the cmd to the pipeline.
-                    try pipeline.append(next_cmd);
                 }
 
                 continue;

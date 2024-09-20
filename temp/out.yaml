@@ -9,30 +9,19 @@ cmd:
               - word:
                   parts:
                     - literal: world
-    - word:
-        parts:
-          - literal: sed
-    - word:
-        parts:
-          - str:
-              parts:
-                - s/o/a/
-    - pipeline:
         - cmd:
             parts:
               - word:
                   parts:
-                    - literal: echo
+                    - literal: sed
               - word:
                   parts:
-                    - literal: world
-        - cmd:
-            parts:
-              - pipeline:
-                  - cmd:
-                      parts: []
-                  - cmd:
-                      parts:
-                        - word:
-                            parts:
-                              - literal: "true"
+                    - str:
+                        parts:
+                          - s/o/a/
+    - or_cmd:
+        cmd:
+          parts:
+            - word:
+                parts:
+                  - literal: "true"
