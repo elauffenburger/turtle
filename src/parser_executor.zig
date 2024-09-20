@@ -26,12 +26,14 @@ pub const ParserExecutor = struct {
 
         var lastStatus: u8 = 0;
         while (true) {
-            const cmd = parser.parse() catch |err| switch (err) {
+            const command = parser.parse() catch |err| switch (err) {
                 cmd_parser.ParseError.EOF => break,
                 else => return err,
             };
 
-            lastStatus = try self.executor.exec(cmd, execOpts);
+            try std.json.stringify(command, .{ .whitespace = .indent_1 }, std.io.getStdOut().writer());
+
+            lastStatus = try self.executor.exec(command, execOpts);
         }
 
         return lastStatus;

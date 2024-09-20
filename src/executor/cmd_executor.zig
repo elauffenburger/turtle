@@ -22,15 +22,52 @@ const ExecutableCmd = union(enum) {
     const Normal = struct {
         args: std.ArrayList([]u8),
         env: std.ArrayList([]u8),
+
+        pub fn jsonStringify(self: *const Normal, jws: anytype) !void {
+            jws.beginObject();
+            jws.objectField("normal");
+            jws.beginObject();
+            jws.objectField("args");
+            jws.beginArray();
+            for (self.args.items) |arg| {
+                jws.write(arg);
+            }
+            jws.endArray();
+            jws.endObject();
+            jws.endObject();
+        }
     };
 
     const Branch = struct {
         left: ExecutableCmd,
         right: ExecutableCmd,
+
+        pub fn jsonStringify(self: Branch, jws: anytype) !void {
+            jws.beginObject();
+            jws.objectField("branch");
+            jws.beginObject();
+            jws.objectField("left");
+            self.left.jsonStringify(jws);
+            jws.objectField("right");
+            self.right.jsonStringify(jws);
+            jws.endObject();
+            jws.endObject();
+        }
     };
 
     const Pipeline = struct {
         cmds: std.ArrayList(ExecutableCmd),
+
+        pub fn jsonStringify(self: Pipeline, jws: anytype) !void {
+            jws.beginObject();
+            jws.objectField("pipeline");
+            jws.beginArray();
+            for (self.cmds.items) |item| {
+                item.jsonStringify(jws);
+            }
+            jws.endArray();
+            jws.endObject();
+        }
     };
 
     normal_cmd: Normal,
@@ -39,6 +76,29 @@ const ExecutableCmd = union(enum) {
     and_cmd: *Branch,
 
     pipeline: Pipeline,
+
+    pub fn jsonStringify(self: ExecutableCmd, jws: anytype) !void {
+        jws.beginObject();
+        switch (self) {
+            .normal_cmd => |normal_cmd| {
+                jws.objectField("normal_cmd");
+                normal_cmd.jsonStringify(jws);
+            },
+            .or_cmd => |or_cmd| {
+                jws.objectField("or_cmd");
+                or_cmd.jsonStringify(jws);
+            },
+            .and_cmd => |and_cmd| {
+                jws.objectField("and_cmd");
+                and_cmd.jsonStringify(jws);
+            },
+            .pipeline => |pipeline| {
+                jws.objectField("pipeline");
+                pipeline.jsonStringify(jws);
+            },
+        }
+        jws.endObject();
+    }
 };
 
 pub const CmdExecutor = struct {

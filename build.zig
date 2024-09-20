@@ -35,6 +35,9 @@ pub fn build(b: *std.Build) !void {
         .link_libc = true,
     });
 
+    const pretty = b.dependency("pretty", .{ .target = target, .optimize = optimize });
+    cli.root_module.addImport("pretty", pretty.module("pretty"));
+
     cli.linkSystemLibrary("glib-2.0");
     cli.linkSystemLibrary("readline");
 

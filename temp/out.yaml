@@ -1,0 +1,38 @@
+cmd:
+  parts:
+    - pipeline:
+        - cmd:
+            parts:
+              - word:
+                  parts:
+                    - literal: echo
+              - word:
+                  parts:
+                    - literal: world
+    - word:
+        parts:
+          - literal: sed
+    - word:
+        parts:
+          - str:
+              parts:
+                - s/o/a/
+    - pipeline:
+        - cmd:
+            parts:
+              - word:
+                  parts:
+                    - literal: echo
+              - word:
+                  parts:
+                    - literal: world
+        - cmd:
+            parts:
+              - pipeline:
+                  - cmd:
+                      parts: []
+                  - cmd:
+                      parts:
+                        - word:
+                            parts:
+                              - literal: "true"
