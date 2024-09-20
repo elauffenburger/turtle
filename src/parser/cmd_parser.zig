@@ -424,8 +424,8 @@ pub const CmdParser = struct {
                         break;
                     };
 
-                    // If we've exited the pipeline, then we're done; add the pipeline part and then
-                    // add all the parts of the command we just parsed and continue.
+                    // If we've exited the pipeline, then we're done; add what we were able to parse to the pipeline
+                    // and add _that_ to the result.
                     if (!self.in_pipeline) {
                         try res.parts.append(.{ .pipeline = pipeline });
 

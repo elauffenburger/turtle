@@ -10,6 +10,7 @@ pub const Args = struct {
 
     cmd_str: ?[]u8 = null,
     filename: ?[]u8 = null,
+    output: ?[]u8 = null,
 
     pub fn parse(allocator: *mem.Allocator) !Self {
         var args: Self = .{};
@@ -23,7 +24,16 @@ pub const Args = struct {
                     args.cmd_str = try allocator.dupe(u8, next);
                     continue;
                 } else {
-                    unreachable;
+                    @panic("command string required if -c provided");
+                }
+            }
+
+            if (mem.eql(u8, arg, "-o")) {
+                if (args_iter.next()) |next| {
+                    args.output = try allocator.dupe(u8, next);
+                    continue;
+                } else {
+                    @panic("output type required if -o provided");
                 }
             }
 

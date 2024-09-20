@@ -8,6 +8,14 @@ pub const ParserExecutor = struct {
     allocator: mem.Allocator,
     executor: cmd_executor.CmdExecutor,
 
+    pub const Options = struct {
+        pub const OutputType = enum {
+            command,
+        };
+
+        output: ?OutputType,
+    };
+
     pub fn init(allocator: mem.Allocator) ParserExecutor {
         return .{
             .allocator = allocator,
@@ -15,7 +23,7 @@ pub const ParserExecutor = struct {
         };
     }
 
-    pub fn exec(self: *ParserExecutor, line: []u8) !u8 {
+    pub fn exec(self: *ParserExecutor, line: []u8, options: Options) !u8 {
         var parser = cmd_parser.CmdParser.init(self.allocator, line);
 
         const execOpts = cmd_executor.ExecOpts{
@@ -31,7 +39,10 @@ pub const ParserExecutor = struct {
                 else => return err,
             };
 
-            try std.json.stringify(command, .{ .whitespace = .indent_1 }, std.io.getStdOut().writer());
+            if (options.output == .command) {
+                try std.json.stringify(command, .{ .whitespace = .indent_1 }, std.io.getStdOut().writer());
+                return 0;
+            }
 
             lastStatus = try self.executor.exec(command, execOpts);
         }
