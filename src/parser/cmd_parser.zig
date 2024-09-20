@@ -361,7 +361,8 @@ pub const CmdParser = struct {
             }
 
             if (ch == '&') {
-                ch = try self.next();
+                // Check if we're in an '&&'.
+                ch = try self.peek(1);
                 if (ch == '&') {
                     // If we're currently in a pipeline, return the command we've built so far and mark that we've reached the end of the pipeline.
                     if (self.in_pipeline) {
@@ -371,8 +372,11 @@ pub const CmdParser = struct {
 
                     self.can_set_vars = true;
 
+                    // Otherwise, chomp the second '&' in '&&' and move to the next character to prepare for the next parse.
+                    _ = try self.next();
                     _ = try self.next();
 
+                    // Parse the next command and put it in an "and".
                     try res.parts.append(.{ .and_cmd = try self.parse() });
                     continue;
                 } else {
