@@ -173,8 +173,8 @@ pub const CmdParser = struct {
         sub_parser.in_sub = true;
         const sub = try sub_parser.parse();
 
-        // Skip ahead however many characters the subexpression parsing consumed.
-        _ = try self.take(sub_parser.buf_offset);
+        // Skip ahead however many characters the subexpression parsing consumed (+1 for the `)` char).
+        _ = try self.take(sub_parser.buf_offset + 1);
 
         return sub;
     }
@@ -323,8 +323,21 @@ pub const CmdParser = struct {
                 break;
             }
 
-            if (ch == '\n' or ch == ';' or (self.in_sub and ch == ')')) {
-                _ = self.next() catch break;
+            if (self.in_sub and ch == ')') {
+                // The end of the sub is also the end of pipeline, but we don't want to flip
+                // the `in_sub` bit here; just flip the `in_pipeline` bit and bail; the parser
+                // will realize this is the end of the pipeline in the outer scope and bail
+                // from _there_ correctly.
+                if (self.in_pipeline) {
+                    self.in_pipeline = false;
+                    return res;
+                }
+
+                self.in_sub = false;
+                return res;
+            }
+
+            if (ch == '\n' or ch == ';') {
                 return res;
             }
 
@@ -427,8 +440,10 @@ pub const CmdParser = struct {
                 res = try self.allocator.create(cmd.Cmd);
                 res.* = cmd.Cmd.init(self.allocator);
 
-                // Add as many additional commands as we can.
+                // Mark that we're currently in a pipeline.
                 self.in_pipeline = true;
+
+                // Add as many additional commands as we can.
                 while (true) {
                     const next_cmd = self.parse() catch {
                         try res.parts.append(.{ .pipeline = pipeline });

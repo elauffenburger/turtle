@@ -325,8 +325,6 @@ pub const CmdExecutor = struct {
                         util.giveup("wordToStr: proc sub file chmod failed", .{});
                     }
 
-                    proc.waitForDebugger();
-
                     // Write to the file during execution.
                     const maybeStatus = self.exec(proc_sub.*, .{
                         .stdin_fno = std.posix.STDIN_FILENO,

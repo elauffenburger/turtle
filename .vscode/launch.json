@@ -19,7 +19,7 @@
       "request": "launch",
       "args": [
         "-c",
-        "echo world | sed 's/o/a/' || true"
+        "echo $(echo a)$(echo b)"
       ],
       "program": "${workspaceFolder}/zig-out/bin/turtle",
       "preLaunchTask": "build"

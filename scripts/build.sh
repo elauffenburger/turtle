@@ -12,7 +12,7 @@ main() {
     fi
 
     # Apply patches to libraries.
-    patch -sN || true <<EOF "$ROOT_DIR/vendor/zig-tracy/build.zig"
+    patch -sN "$ROOT_DIR/vendor/zig-tracy/build.zig" <<EOF >/dev/null || true
 58c58
 <         .root_source_file = .{ .path = "./src/tracy.zig" },
 ---
