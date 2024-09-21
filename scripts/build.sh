@@ -20,6 +20,7 @@ main() {
 EOF
 
     zig build
+    echo DONE
 }
 
 main "$@"

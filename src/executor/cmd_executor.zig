@@ -24,17 +24,17 @@ const ExecutableCmd = union(enum) {
         env: std.StringHashMap(cmd.CmdWord),
 
         pub fn jsonStringify(self: Normal, jws: anytype) !void {
-            jws.beginObject();
-            jws.objectField("normal");
-            jws.beginObject();
-            jws.objectField("args");
-            jws.beginArray();
+            try jws.beginObject();
+            try jws.objectField("normal");
+            try jws.beginObject();
+            try jws.objectField("args");
+            try jws.beginArray();
             for (self.args.items) |arg| {
-                jws.write(arg);
+                try arg.jsonStringify(jws);
             }
-            jws.endArray();
-            jws.endObject();
-            jws.endObject();
+            try jws.endArray();
+            try jws.endObject();
+            try jws.endObject();
         }
     };
 
@@ -43,15 +43,15 @@ const ExecutableCmd = union(enum) {
         right: ExecutableCmd,
 
         pub fn jsonStringify(self: Branch, jws: anytype) !void {
-            jws.beginObject();
-            jws.objectField("branch");
-            jws.beginObject();
-            jws.objectField("left");
-            self.left.jsonStringify(jws);
-            jws.objectField("right");
-            self.right.jsonStringify(jws);
-            jws.endObject();
-            jws.endObject();
+            try jws.beginObject();
+            try jws.objectField("branch");
+            try jws.beginObject();
+            try jws.objectField("left");
+            try self.left.jsonStringify(jws);
+            try jws.objectField("right");
+            try self.right.jsonStringify(jws);
+            try jws.endObject();
+            try jws.endObject();
         }
     };
 
@@ -59,14 +59,14 @@ const ExecutableCmd = union(enum) {
         cmds: std.ArrayList(ExecutableCmd),
 
         pub fn jsonStringify(self: Pipeline, jws: anytype) !void {
-            jws.beginObject();
-            jws.objectField("pipeline");
-            jws.beginArray();
+            try jws.beginObject();
+            try jws.objectField("pipeline");
+            try jws.beginArray();
             for (self.cmds.items) |item| {
-                item.jsonStringify(jws);
+                try item.jsonStringify(jws);
             }
-            jws.endArray();
-            jws.endObject();
+            try jws.endArray();
+            try jws.endObject();
         }
     };
 
@@ -76,27 +76,36 @@ const ExecutableCmd = union(enum) {
     or_cmd: *Branch,
     and_cmd: *Branch,
 
-    pub fn jsonStringify(self: ExecutableCmd, jws: anytype) !void {
-        jws.beginObject();
+    pub fn jsonStringify(self: ExecutableCmd, jws: anytype) @TypeOf(jws.*).Error!void {
+        try jws.beginObject();
         switch (self) {
             .normal_cmd => |normal_cmd| {
-                jws.objectField("normal_cmd");
-                normal_cmd.jsonStringify(jws);
+                try jws.objectField("normal_cmd");
+                try normal_cmd.jsonStringify(jws);
+            },
+            .set_vars => |set_vars| {
+                try jws.objectField("set_vars");
+
+                var it = set_vars.iterator();
+                while (it.next()) |entry| {
+                    try jws.objectField(entry.key_ptr.*);
+                    try entry.value_ptr.jsonStringify(jws);
+                }
             },
             .or_cmd => |or_cmd| {
-                jws.objectField("or_cmd");
-                or_cmd.jsonStringify(jws);
+                try jws.objectField("or_cmd");
+                try or_cmd.jsonStringify(jws);
             },
             .and_cmd => |and_cmd| {
-                jws.objectField("and_cmd");
-                and_cmd.jsonStringify(jws);
+                try jws.objectField("and_cmd");
+                try and_cmd.jsonStringify(jws);
             },
             .pipeline => |pipeline| {
-                jws.objectField("pipeline");
-                pipeline.jsonStringify(jws);
+                try jws.objectField("pipeline");
+                try pipeline.jsonStringify(jws);
             },
         }
-        jws.endObject();
+        try jws.endObject();
     }
 };
 
@@ -135,7 +144,7 @@ pub const CmdExecutor = struct {
     }
 
     // TODO: we should really wait until the last second to perform cmd/proc subs! This is a bit surprising because building a cmd ends up having side effects!
-    fn buildExecutableCmd(self: Self, command: cmd.Cmd) anyerror!ExecutableCmd {
+    pub fn buildExecutableCmd(self: Self, command: cmd.Cmd) anyerror!ExecutableCmd {
         var args = std.ArrayList(cmd.CmdWord).init(self.allocator);
         var env = std.StringHashMap(cmd.CmdWord).init(self.allocator);
 

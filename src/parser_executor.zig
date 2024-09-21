@@ -11,6 +11,7 @@ pub const ParserExecutor = struct {
     pub const Options = struct {
         pub const OutputType = enum {
             command,
+            executableCommand,
         };
 
         output: ?OutputType,
@@ -26,27 +27,36 @@ pub const ParserExecutor = struct {
     pub fn exec(self: *ParserExecutor, line: []u8, options: Options) !u8 {
         var parser = cmd_parser.CmdParser.init(self.allocator, line);
 
-        const execOpts = cmd_executor.ExecOpts{
+        const exec_opts = cmd_executor.ExecOpts{
             .stdin_fno = std.posix.STDIN_FILENO,
             .stdout_fno = std.posix.STDOUT_FILENO,
             .wait = true,
         };
 
-        var lastStatus: u8 = 0;
+        var last_status: u8 = 0;
         while (true) {
             const command = parser.parse() catch |err| switch (err) {
                 cmd_parser.ParseError.EOF => break,
                 else => return err,
             };
 
-            if (options.output == .command) {
-                try std.json.stringify(command, .{ .whitespace = .indent_1 }, std.io.getStdOut().writer());
-                return 0;
+            if (options.output) |output| {
+                switch (output) {
+                    .command => {
+                        try std.json.stringify(command, .{}, std.io.getStdOut().writer());
+                        return 0;
+                    },
+                    .executableCommand => {
+                        const executable_cmd = try self.executor.buildExecutableCmd(command.*);
+                        try std.json.stringify(executable_cmd, .{}, std.io.getStdOut().writer());
+                        return 0;
+                    },
+                }
             }
 
-            lastStatus = try self.executor.exec(command.*, execOpts);
+            last_status = try self.executor.exec(command.*, exec_opts);
         }
 
-        return lastStatus;
+        return last_status;
     }
 };

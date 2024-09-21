@@ -32,8 +32,14 @@ fn emain() !void {
     const parser_executor_options = ParserExecutor.Options{
         .output = blk: {
             if (args.output) |output| {
-                if (mem.eql(u8, output, "command")) {
+                const output_normalized = std.ascii.lowerString(try allocator.alloc(u8, output.len), output);
+
+                if (mem.eql(u8, output_normalized, "command")) {
                     break :blk .command;
+                }
+
+                if (mem.eql(u8, output_normalized, "executablecommand")) {
+                    break :blk .executableCommand;
                 }
 
                 try std.io.getStdErr().writeAll(try std.fmt.allocPrint(allocator, "unknown output format: \"{s}\"", .{output}));
