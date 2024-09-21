@@ -3,7 +3,6 @@ const assert = std.debug.assert;
 
 const cmd = @import("../parser/cmd.zig");
 
-const proc = @import("proc.zig");
 const util = @import("util.zig");
 const c = util.c;
 
@@ -398,7 +397,7 @@ pub const CmdExecutor = struct {
                     try env.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ key, value }));
                 }
 
-                const fork_exec_args = proc.ForkExecArgs{
+                const fork_exec_args = ForkExecArgs{
                     .argv = args.items,
                     .envp = env.items,
                     .stdin_fno = opts.stdin_fno,
@@ -406,9 +405,9 @@ pub const CmdExecutor = struct {
                 };
 
                 if (opts.wait) {
-                    return .{ .status = try proc.forkExec(self.allocator, fork_exec_args) };
+                    return .{ .status = try self.forkExec(self.allocator, fork_exec_args) };
                 } else {
-                    return .{ .pid = try proc.forkExecNoWait(self.allocator, fork_exec_args) };
+                    return .{ .pid = try self.forkExecNoWait(self.allocator, fork_exec_args) };
                 }
             },
             .set_vars => |set_vars| {
@@ -508,7 +507,7 @@ pub const CmdExecutor = struct {
 
             var exit_status: u8 = 0;
             for (pipeline_procs.items, 0..) |pipeline_proc, i| {
-                const status = proc.wait(pipeline_proc.pid);
+                const status = wait(pipeline_proc.pid);
 
                 // If this proc failed, kill the rest of the procs in the pipeline and bail.
                 if (status != 0) {
@@ -524,7 +523,7 @@ pub const CmdExecutor = struct {
             std.posix.exit(exit_status);
         }
 
-        const status = proc.wait(pid);
+        const status = wait(pid);
         return .{
             .status = status,
         };
@@ -534,5 +533,76 @@ pub const CmdExecutor = struct {
         self.last_status_code = status;
         c.longjmp(&self.err_jmp_buf.?, status);
         unreachable;
+    }
+
+    const ForkExecArgs = struct {
+        argv: [][]u8,
+        envp: [][]u8,
+        stdin_fno: c_int,
+        stdout_fno: c_int,
+    };
+
+    fn forkExecNoWait(_: *Self, allocator: std.mem.Allocator, args: ForkExecArgs) !i32 {
+        const pid = try std.posix.fork();
+        if (pid == 0) {
+            if (args.stdin_fno != c.STDIN_FILENO) {
+                replaceFd(args.stdin_fno, std.posix.STDIN_FILENO);
+            }
+
+            if (args.stdout_fno != c.STDOUT_FILENO) {
+                replaceFd(args.stdout_fno, std.posix.STDOUT_FILENO);
+            }
+
+            const argv = try toCStringVec(allocator, args.argv);
+            // defer self.allocator.destroy(argv.ptr);
+
+            const envp = try toCStringVec(allocator, args.envp);
+            // defer self.allocator.destroy(envp);
+
+            // Finally run this thing.
+            const err = std.posix.execvpeZ(argv[0].?, argv, envp);
+
+            // If we got here, that means the exec failed!
+            std.log.err("execTerm: exec {s} failed: {any}\n", .{ args.argv[0], err });
+            std.posix.exit(1);
+        }
+
+        return pid;
+    }
+
+    fn forkExec(self: *Self, allocator: std.mem.Allocator, args: ForkExecArgs) !u8 {
+        return wait(try self.forkExecNoWait(allocator, args));
+    }
+
+    fn wait(pid: i32) u8 {
+        // Wait for the child to finish.
+        const res = std.posix.waitpid(pid, 0);
+
+        // HACK: looks like there's some kind of result code mangling on Mac OS at least
+        // that shifts the num 8 bits to the right, so let's undo that...
+        const status: u8 = @intCast(res.status >> 8);
+
+        return status;
+    }
+
+    fn toCStringVec(allocator: std.mem.Allocator, slice: [][]u8) ![*:null]?[*:0]const u8 {
+        const vec = try allocator.allocSentinel(?[*:0]const u8, slice.len, null);
+        for (slice, 0..) |str, i| {
+            vec[i] = try allocator.dupeZ(u8, str);
+        }
+
+        return vec;
+    }
+
+    fn replaceFd(old: c_int, new: c_int) void {
+        _ = c.dup2(old, new);
+        _ = c.close(old);
+    }
+
+    fn sigIgnore(_: c_int) callconv(.C) void {}
+
+    fn waitForDebugger() void {
+        _ = c.signal(1, sigIgnore);
+        _ = c.sleep(10);
     }
 };

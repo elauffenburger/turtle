@@ -27,6 +27,8 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const tracy_enable = b.option(bool, "tracy_enable", "true if tracy should be enabled") orelse true;
+
     var cli = b.addExecutable(.{
         .name = "turtle",
         .root_source_file = b.path("./src/main.zig"),
@@ -35,8 +37,16 @@ pub fn build(b: *std.Build) !void {
         .link_libc = true,
     });
 
-    const pretty = b.dependency("pretty", .{ .target = target, .optimize = optimize });
-    cli.root_module.addImport("pretty", pretty.module("pretty"));
+    // Set up zig-tracy.
+    const tracy = b.dependency("tracy", .{
+        .target = target,
+        .optimize = optimize,
+        .tracy_enable = tracy_enable,
+    });
+    cli.root_module.addImport("tracy", tracy.module("tracy"));
+    cli.linkLibrary(tracy.artifact("tracy"));
+
+    cli.linkLibCpp();
 
     cli.linkSystemLibrary("glib-2.0");
     cli.linkSystemLibrary("readline");

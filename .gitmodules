@@ -1,0 +1,3 @@
+[submodule "vendor/zig-tracy"]
+	path = vendor/zig-tracy
+	url = https://github.com/cipharius/zig-tracy
