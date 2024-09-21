@@ -44,12 +44,12 @@ pub const ParserExecutor = struct {
                 switch (output) {
                     .command => {
                         try std.json.stringify(command, .{}, std.io.getStdOut().writer());
-                        return 0;
+                        continue;
                     },
                     .executableCommand => {
                         const executable_cmd = try self.executor.buildExecutableCmd(command.*);
                         try std.json.stringify(executable_cmd, .{}, std.io.getStdOut().writer());
-                        return 0;
+                        continue;
                     },
                 }
             }

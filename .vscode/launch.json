@@ -19,7 +19,7 @@
       "request": "launch",
       "args": [
         "-c",
-        "echo $(echo a)$(echo b)"
+        "echo foo;"
       ],
       "program": "${workspaceFolder}/zig-out/bin/turtle",
       "preLaunchTask": "build"

@@ -338,7 +338,7 @@ pub const CmdParser = struct {
             }
 
             if (ch == '\n' or ch == ';') {
-                _ = try self.next();
+                _ = self.next() catch return res;
                 return res;
             }
 
