@@ -2,12 +2,10 @@ const std = @import("std");
 
 pub const Cmd = struct {
     parts: std.ArrayList(CmdPart),
-    env_vars: std.StringHashMap([]u8),
 
     pub fn init(allocator: std.mem.Allocator) @This() {
         return .{
             .parts = std.ArrayList(CmdPart).init(allocator),
-            .env_vars = std.StringHashMap([]u8).init(allocator),
         };
     }
 

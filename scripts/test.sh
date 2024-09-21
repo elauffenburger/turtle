@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -u -o pipefail
 
 TURTLE_BIN="$(dirname "$0")/../zig-out/bin/turtle"
 
@@ -39,26 +40,26 @@ t() {
     [[ "$ACTUAL_EXIT_CODE" == "$EXPECTED_EXIT_CODE" ]] && STATUS_CODES_MATCH=1
 
     if [[ "$OUTPUTS_MATCH" == 1 && "$STATUS_CODES_MATCH" == 1 ]]; then
-        echo "- PASS: $NAME"
+        echo "PASS: $NAME"
 
         if [[ "$PROFILE" == 1 ]]; then
-            echo "  - expected time: $EXPECTED_TIME"
-            echo "  - actual time  : $ACTUAL_TIME"
+            echo " - expected time: $EXPECTED_TIME"
+            echo " - actual time  : $ACTUAL_TIME"
         fi
 
         return
     fi
 
-    echo "- FAIL: $NAME"
+    echo "FAIL: $NAME"
 
     if [[ "$STATUS_CODES_MATCH" != 1 ]]; then
-        echo "  - expected exit code: $EXPECTED_EXIT_CODE"
-        echo "  - actual exit code  : $ACTUAL_EXIT_CODE"
+        echo " - expected exit code: $EXPECTED_EXIT_CODE"
+        echo " - actual exit code  : $ACTUAL_EXIT_CODE"
     fi
 
     if [[ "$OUTPUTS_MATCH" != 1 ]]; then
-        echo "  - expected: $EXPECTED"
-        echo "  - actual  : $ACTUAL"
+        echo " - expected: $EXPECTED"
+        echo " - actual  : $ACTUAL"
     fi
 }
 
@@ -84,10 +85,10 @@ main() {
     if [[ "$SKIP_BUILD" != 1 ]]; then
         # Build turtle.
         echo "building..."
-        BUILD_OUTPUT=$($(dirname "$0")/build.sh 2>&1)
-        if [[ "$?" != 0 ]]; then
+        BUILD_OUTPUT=$(mktemp)
+        if ! "$(dirname "$0")/build.sh" | tee "$BUILD_OUTPUT"; then
             echo 'build failed'
-            echo "$BUILD_OUTPUT"
+            cat "$BUILD_OUTPUT"
             exit 1
         fi
 
@@ -122,7 +123,7 @@ tests() {
     t 'strings - double quote' 'echo "foo bar" baz'
     t 'strings - single quote - vars' $'FOO=foo; echo "$FOO bar" baz'
 
-    echo 'done!'
+    echo 'DONE'
 }
 
 main "$@"

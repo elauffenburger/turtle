@@ -44,7 +44,7 @@ pub const ParserExecutor = struct {
                 return 0;
             }
 
-            lastStatus = try self.executor.exec(command, execOpts);
+            lastStatus = try self.executor.exec(command.*, execOpts);
         }
 
         return lastStatus;

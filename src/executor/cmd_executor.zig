@@ -20,10 +20,10 @@ const ExecBuiltCmdResult = union(enum) {
 
 const ExecutableCmd = union(enum) {
     const Normal = struct {
-        args: std.ArrayList([]u8),
-        env: std.ArrayList([]u8),
+        args: std.ArrayList(cmd.CmdWord),
+        env: std.StringHashMap(cmd.CmdWord),
 
-        pub fn jsonStringify(self: *const Normal, jws: anytype) !void {
+        pub fn jsonStringify(self: Normal, jws: anytype) !void {
             jws.beginObject();
             jws.objectField("normal");
             jws.beginObject();
@@ -71,11 +71,10 @@ const ExecutableCmd = union(enum) {
     };
 
     normal_cmd: Normal,
-
+    set_vars: std.StringHashMap(cmd.CmdWord),
+    pipeline: Pipeline,
     or_cmd: *Branch,
     and_cmd: *Branch,
-
-    pipeline: Pipeline,
 
     pub fn jsonStringify(self: ExecutableCmd, jws: anytype) !void {
         jws.beginObject();
@@ -106,7 +105,7 @@ pub const CmdExecutor = struct {
 
     allocator: std.mem.Allocator,
 
-    vars: std.StringHashMap([]u8),
+    env_vars: std.StringHashMap([]u8),
     last_pid: ?c_int,
     last_status_code: ?u8,
 
@@ -117,12 +116,12 @@ pub const CmdExecutor = struct {
             .allocator = allocator,
             .last_pid = null,
             .last_status_code = null,
-            .vars = std.StringHashMap([]u8).init(allocator),
+            .env_vars = std.StringHashMap([]u8).init(allocator),
             .err_jmp_buf = null,
         };
     }
 
-    pub fn exec(self: *Self, command: *cmd.Cmd, opts: ExecOpts) anyerror!u8 {
+    pub fn exec(self: *Self, command: cmd.Cmd, opts: ExecOpts) anyerror!u8 {
         self.err_jmp_buf = [_]c_int{0} ** 48;
         if (c.setjmp(&self.err_jmp_buf.?) != 0) {
             return self.last_status_code.?;
@@ -136,30 +135,19 @@ pub const CmdExecutor = struct {
     }
 
     // TODO: we should really wait until the last second to perform cmd/proc subs! This is a bit surprising because building a cmd ends up having side effects!
-    fn buildExecutableCmd(self: *Self, command: *cmd.Cmd) anyerror!ExecutableCmd {
-        var args = std.ArrayList([]u8).init(self.allocator);
-        const env = std.ArrayList([]u8).init(self.allocator);
+    fn buildExecutableCmd(self: Self, command: cmd.Cmd) anyerror!ExecutableCmd {
+        var args = std.ArrayList(cmd.CmdWord).init(self.allocator);
+        var env = std.StringHashMap(cmd.CmdWord).init(self.allocator);
 
         // Set up executor err jump.
-        for (command.parts.items, 0..) |part, i| {
+        for (command.parts.items) |part| {
             switch (part) {
                 .var_assign => |var_assign| {
-                    const name = var_assign.name;
-                    const value = try self.wordToStr(var_assign.value);
-
-                    // If this is the only part of the command, set the var as an executor
-                    // var.
-                    if (i == command.parts.items.len - 1) {
-                        try self.vars.put(name, value);
-                    }
-                    // Otherwise, set it as a var for the environment for the command.
-                    else {
-                        try command.env_vars.put(name, value);
-                    }
+                    try env.put(var_assign.name, var_assign.value.*);
                 },
 
                 .word => |word| {
-                    try args.append(try self.wordToStr(word));
+                    try args.append(word.*);
                 },
 
                 .pipeline => |pipeline_cmds| {
@@ -167,7 +155,7 @@ pub const CmdExecutor = struct {
 
                     var pipeline = try std.ArrayList(ExecutableCmd).initCapacity(self.allocator, pipeline_cmds.items.len);
                     for (pipeline_cmds.items) |pipeline_cmd| {
-                        try pipeline.append(try self.buildExecutableCmd(pipeline_cmd));
+                        try pipeline.append(try self.buildExecutableCmd(pipeline_cmd.*));
                     }
 
                     return .{
@@ -186,7 +174,7 @@ pub const CmdExecutor = struct {
                                 .env = env,
                             },
                         },
-                        .right = try self.buildExecutableCmd(or_cmd),
+                        .right = try self.buildExecutableCmd(or_cmd.*),
                     };
 
                     return .{ .or_cmd = built_or_cmd };
@@ -201,12 +189,17 @@ pub const CmdExecutor = struct {
                                 .env = env,
                             },
                         },
-                        .right = try self.buildExecutableCmd(and_cmd),
+                        .right = try self.buildExecutableCmd(and_cmd.*),
                     };
 
                     return .{ .and_cmd = built_and_cmd };
                 },
             }
+        }
+
+        // If there aren't any command args, then that means we _just_ have vars to set.
+        if (args.items.len == 0) {
+            return .{ .set_vars = env };
         }
 
         return .{
@@ -217,7 +210,7 @@ pub const CmdExecutor = struct {
         };
     }
 
-    fn wordToStr(self: *Self, word: *cmd.CmdWord) anyerror![]u8 {
+    fn wordToStr(self: *Self, word: cmd.CmdWord) anyerror![]u8 {
         var res = std.ArrayList(u8).init(self.allocator);
 
         for (word.parts.items) |part| {
@@ -270,7 +263,7 @@ pub const CmdExecutor = struct {
                     }
 
                     // Write to the write end of the pipe while executing the cmd.
-                    const status = try self.exec(cmd_sub, .{
+                    const status = try self.exec(cmd_sub.*, .{
                         .stdin_fno = std.posix.STDIN_FILENO,
                         .stdout_fno = pipe_fnos[1],
                         .wait = true,
@@ -329,7 +322,7 @@ pub const CmdExecutor = struct {
                     }
 
                     // Write to the file during execution.
-                    const maybeStatus = self.exec(proc_sub, .{
+                    const maybeStatus = self.exec(proc_sub.*, .{
                         .stdin_fno = std.posix.STDIN_FILENO,
                         .stdout_fno = fd,
                         .wait = true,
@@ -359,7 +352,7 @@ pub const CmdExecutor = struct {
         return res.toOwnedSlice();
     }
 
-    fn getVar(self: Self, name: []u8) !?[]u8 {
+    fn getVar(self: Self, name: []const u8) !?[]u8 {
         // Check if this is a special var name.
         if (std.mem.eql(u8, "!", name)) {
             return try std.fmt.allocPrint(self.allocator, "{d}", .{self.last_pid.?});
@@ -369,7 +362,7 @@ pub const CmdExecutor = struct {
         }
 
         // Check if we have a var def for the command.
-        var value = self.vars.get(name);
+        var value = self.env_vars.get(name);
         if (value == null) {
             // Fall back to the environment.
             const envVal = std.posix.getenv(name);
@@ -392,9 +385,22 @@ pub const CmdExecutor = struct {
                     return .{ .status = 0 };
                 }
 
+                var args = std.ArrayList([]u8).init(self.allocator);
+                for (normal_cmd.args.items) |arg| {
+                    try args.append(try self.wordToStr(arg));
+                }
+
+                var env = std.ArrayList([]u8).init(self.allocator);
+                var env_it = normal_cmd.env.iterator();
+                while (env_it.next()) |env_var| {
+                    const key = env_var.key_ptr.*;
+                    const value = try self.wordToStr(env_var.value_ptr.*);
+                    try env.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ key, value }));
+                }
+
                 const fork_exec_args = proc.ForkExecArgs{
-                    .argv = normal_cmd.args.items,
-                    .envp = normal_cmd.env.items,
+                    .argv = args.items,
+                    .envp = env.items,
                     .stdin_fno = opts.stdin_fno,
                     .stdout_fno = opts.stdout_fno,
                 };
@@ -404,6 +410,14 @@ pub const CmdExecutor = struct {
                 } else {
                     return .{ .pid = try proc.forkExecNoWait(self.allocator, fork_exec_args) };
                 }
+            },
+            .set_vars => |set_vars| {
+                var it = set_vars.iterator();
+                while (it.next()) |entry| {
+                    try self.env_vars.put(entry.key_ptr.*, try self.wordToStr(entry.value_ptr.*));
+                }
+
+                return .{ .status = 0 };
             },
             .or_cmd => |or_cmd| {
                 const left_status = try self.execBuiltCmd(or_cmd.left, opts);
