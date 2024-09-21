@@ -110,6 +110,7 @@ tests() {
     t 'pipes - with && - pre' 'true && echo world | sed "s/o/a/"'
     t 'comments' 'echo foo bar baz #foo bar'
     t 'command sub' 'echo $(echo foo) $(echo bar)'
+    t 'command sub - no space' 'echo $(echo foo)$(echo bar)'
     t 'proc sub' 'cat <(echo foo bar)'
     t 'proc sub - multiple' 'cat <(echo foo) <(echo bar)'
     t 'proc sub - with pipeline' 'cat <(echo hello world | cut -d " " -f 1) <(echo world)'

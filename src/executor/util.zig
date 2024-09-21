@@ -12,7 +12,7 @@ pub const c = @cImport({
 });
 
 pub fn giveup(comptime fmt: []const u8, args: anytype) void {
-    std.debug.print(fmt, args);
+    std.log.err(fmt, args);
     std.posix.exit(1);
     unreachable;
 }

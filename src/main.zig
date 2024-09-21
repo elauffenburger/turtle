@@ -1,5 +1,4 @@
 const std = @import("std");
-const debug = std.debug;
 const mem = std.mem;
 
 const Args = @import("args.zig").Args;
@@ -17,10 +16,6 @@ pub fn main() void {
     emain() catch {
         std.posix.exit(1);
     };
-}
-
-fn onexit() void {
-    c.fputs("byte\n", std.c.stderr);
 }
 
 fn emain() !void {

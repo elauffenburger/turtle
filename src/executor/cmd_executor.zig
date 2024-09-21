@@ -287,7 +287,7 @@ pub const CmdExecutor = struct {
                     }
 
                     // Read the result.
-                    var arg = blk: {
+                    const arg = blk: {
                         var argRes = std.ArrayList(u8).init(self.allocator);
 
                         var buf = [_]u8{0} ** c.BUFSIZ;
@@ -313,7 +313,8 @@ pub const CmdExecutor = struct {
                     // Close the read end.
                     _ = c.close(pipe_fnos[0]);
 
-                    try res.appendSlice(try arg.toOwnedSlice());
+                    // Append the string but strip the trailing `\x00`.
+                    try res.appendSlice(arg.items[0 .. arg.items.len - 1]);
                 },
 
                 .proc_sub => |proc_sub| {
@@ -362,7 +363,7 @@ pub const CmdExecutor = struct {
             }
         }
 
-        return res.toOwnedSlice();
+        return res.items;
     }
 
     fn getVar(self: Self, name: []const u8) !?[]u8 {
