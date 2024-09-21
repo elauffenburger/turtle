@@ -1,18 +1,41 @@
 const std = @import("std");
 const mem = std.mem;
 
+const ParserExecutor = @import("parser_executor.zig").ParserExecutor;
+
+fn ComptimeStringMap(comptime V: type, comptime Map: anytype) type {
+    const map_fields = comptime @typeInfo(@TypeOf(Map)).Struct.fields;
+
+    return struct {
+        pub fn get(key: []const u8) ?V {
+            inline for (map_fields) |field| {
+                if (mem.eql(u8, key, field.name)) {
+                    return @field(Map, field.name);
+                }
+            }
+
+            return null;
+        }
+    };
+}
+
 pub const Args = struct {
     const Self = @This();
 
-    const ParseArgsError = error{
-        FilenameAlreadySpecified,
-    };
+    const OutputTypeLookup = ComptimeStringMap(ParserExecutor.Options.OutputType, .{
+        .cmd = .command,
+        .command = .command,
+        .exec = .executableCommand,
+        .execmd = .executableCommand,
+        .execommand = .executableCommand,
+        .executablecommand = .executableCommand,
+    });
 
     cmd_str: ?[]u8 = null,
     filename: ?[]u8 = null,
-    output: ?[]u8 = null,
+    output: ?ParserExecutor.Options.OutputType = null,
 
-    pub fn parse(allocator: *mem.Allocator) !Self {
+    pub fn parse(allocator: mem.Allocator) !Self {
         var args: Self = .{};
 
         var args_iter = std.process.args();
@@ -24,24 +47,40 @@ pub const Args = struct {
                     args.cmd_str = try allocator.dupe(u8, next);
                     continue;
                 } else {
-                    @panic("command string required if -c provided");
+                    std.log.err("command string required if -c provided", .{});
+                    std.posix.exit(1);
                 }
             }
 
             if (mem.eql(u8, arg, "-o")) {
                 if (args_iter.next()) |next| {
-                    args.output = try allocator.dupe(u8, next);
+                    const output = next;
+                    const output_normalized = std.ascii.lowerString(try allocator.alloc(u8, output.len), output);
+
+                    if (OutputTypeLookup.get(output_normalized)) |output_type| {
+                        args.output = output_type;
+                        continue;
+                    }
+
+                    try std.io.getStdErr().writeAll(try std.fmt.allocPrint(allocator, "unknown output format: \"{s}\"", .{output}));
                     continue;
                 } else {
-                    @panic("output type required if -o provided");
+                    std.log.err("output type required if -o provided", .{});
+                    std.posix.exit(1);
                 }
             }
 
-            if (args.filename) |_| {
-                return ParseArgsError.FilenameAlreadySpecified;
+            if (args.filename) |filename| {
+                std.log.err("cannot provided multiple filenames: '{s}', '{s}'", .{ filename, arg });
+                std.posix.exit(1);
             } else {
                 args.filename = try allocator.dupe(u8, arg);
             }
+        }
+
+        if (args.filename != null and args.cmd_str != null) {
+            std.log.err("cannot provided file and command string", .{});
+            std.posix.exit(1);
         }
 
         return args;
