@@ -36,11 +36,16 @@ t() {
     OUTPUTS_MATCH=
     [[ "$ACTUAL" == "$EXPECTED" ]] && OUTPUTS_MATCH=1
 
-    STATUS_CODES_MATCH=
-    [[ "$ACTUAL_EXIT_CODE" == "$EXPECTED_EXIT_CODE" ]] && STATUS_CODES_MATCH=1
+    EXIT_CODES_MATCH=
+    [[ "$ACTUAL_EXIT_CODE" == "$EXPECTED_EXIT_CODE" ]] && EXIT_CODES_MATCH=1
 
-    if [[ "$OUTPUTS_MATCH" == 1 && "$STATUS_CODES_MATCH" == 1 ]]; then
-        echo "PASS: $NAME"
+    if [[ "$OUTPUTS_MATCH" == 1 && "$EXIT_CODES_MATCH" == 1 ]]; then
+        cat <<EOF
+PASS: $NAME"
+OUTPUT:
+$EXPECTED
+EXIT CODE: $EXPECTED_EXIT_CODE
+EOF
 
         if [[ "$PROFILE" == 1 ]]; then
             echo " - expected time: $EXPECTED_TIME"
@@ -52,7 +57,7 @@ t() {
 
     echo "FAIL: $NAME"
 
-    if [[ "$STATUS_CODES_MATCH" != 1 ]]; then
+    if [[ "$EXIT_CODES_MATCH" != 1 ]]; then
         echo " - expected exit code: $EXPECTED_EXIT_CODE"
         echo " - actual exit code  : $ACTUAL_EXIT_CODE"
     fi

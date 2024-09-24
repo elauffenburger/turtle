@@ -82,7 +82,6 @@ pub const CmdParser = struct {
 
         var ch = try self.curr();
         while (true) {
-
             // If one of the following is true, we're done!
             //  * ch is an "end of word" character
             //  * we're in a substitution and ch is the end of the substitution

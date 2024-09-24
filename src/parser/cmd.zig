@@ -104,19 +104,21 @@ pub const CmdWord = struct {
                     try jws.objectField("parts");
                     try jws.beginArray();
                     for (str.parts.items) |str_part| {
+                        try jws.beginObject();
                         switch (str_part) {
                             .literal => |literal| {
+                                try jws.objectField("literal");
                                 try jws.write(literal);
                             },
                             .variable => |variable| {
+                                try jws.objectField("variable");
                                 try jws.beginObject();
-
                                 try jws.objectField("name");
                                 try jws.write(variable.name);
-
                                 try jws.endObject();
                             },
                         }
+                        try jws.endObject();
                     }
                     try jws.endArray();
                     try jws.endObject();

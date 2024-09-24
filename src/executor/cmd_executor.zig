@@ -86,11 +86,13 @@ const ExecutableCmd = union(enum) {
             .set_vars => |set_vars| {
                 try jws.objectField("set_vars");
 
+                try jws.beginObject();
                 var it = set_vars.iterator();
                 while (it.next()) |entry| {
-                    try jws.objectField(entry.key_ptr.*);
+                    try jws.objectField("foo");
                     try entry.value_ptr.jsonStringify(jws);
                 }
+                try jws.endObject();
             },
             .or_cmd => |or_cmd| {
                 try jws.objectField("or_cmd");
