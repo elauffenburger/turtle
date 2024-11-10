@@ -1,23 +1,8 @@
 const std = @import("std");
 const mem = std.mem;
 
+const ComptimeStringMap = @import("./collections/comptime_string_map.zig").ComptimeStringMap;
 const ParserExecutor = @import("parser_executor.zig").ParserExecutor;
-
-fn ComptimeStringMap(comptime V: type, comptime Map: anytype) type {
-    const map_fields = comptime @typeInfo(@TypeOf(Map)).Struct.fields;
-
-    return struct {
-        pub fn get(key: []const u8) ?V {
-            inline for (map_fields) |field| {
-                if (mem.eql(u8, key, field.name)) {
-                    return @field(Map, field.name);
-                }
-            }
-
-            return null;
-        }
-    };
-}
 
 pub const Args = struct {
     const Self = @This();

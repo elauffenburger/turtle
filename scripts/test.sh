@@ -24,14 +24,14 @@ t() {
     echo "$*" >"$TEMP_FILE"
 
     EXPECTED_WITH_TIME=$(bash -c "time bash <(cat $TEMP_FILE)" 2>&1)
+    EXPECTED_EXIT_CODE="$?"
     EXPECTED=$(ghead -n -3 <<<"$EXPECTED_WITH_TIME")
     EXPECTED_TIME=$(gtail -n -3 <<<"$EXPECTED_WITH_TIME" | tr '\n' ' ')
-    EXPECTED_EXIT_CODE="$?"
 
     ACTUAL_WITH_TIME=$(bash -c "time $TURTLE_BIN <(cat $TEMP_FILE)" 2>&1)
+    ACTUAL_EXIT_CODE="$?"
     ACTUAL=$(ghead -n -3 <<<"$ACTUAL_WITH_TIME")
     ACTUAL_TIME=$(gtail -n -3 <<<"$ACTUAL_WITH_TIME" | tr '\n' ' ')
-    ACTUAL_EXIT_CODE="$?"
 
     OUTPUTS_MATCH=
     [[ "$ACTUAL" == "$EXPECTED" ]] && OUTPUTS_MATCH=1
@@ -41,9 +41,8 @@ t() {
 
     if [[ "$OUTPUTS_MATCH" == 1 && "$EXIT_CODES_MATCH" == 1 ]]; then
         cat <<EOF
-PASS: $NAME"
-OUTPUT:
-$EXPECTED
+PASS: $NAME
+OUTPUT: $EXPECTED
 EXIT CODE: $EXPECTED_EXIT_CODE
 EOF
 

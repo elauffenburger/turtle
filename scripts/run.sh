@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -eu -o pipefail
 
-. "$(dirname $0)/build.sh"
-"$(dirname $0)/../zig-out/bin/turtle" "$@"
+SCRIPT_DIR=$(realpath "$(dirname "$0")")
+
+. "$SCRIPT_DIR/build.sh"
+"$SCRIPT_DIR/../zig-out/bin/turtle" "$@"

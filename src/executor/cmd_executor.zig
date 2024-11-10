@@ -1,6 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const ComptimeStringMap = @import("../collections/comptime_string_map.zig").ComptimeStringMap;
+
 const cmd = @import("../parser/cmd.zig");
 
 const proc = @import("proc.zig");
@@ -213,6 +215,7 @@ pub const CmdExecutor = struct {
             return .{ .set_vars = env };
         }
 
+        // Otherwise, this is a normal command.
         return .{
             .normal_cmd = .{
                 .args = args,
@@ -414,6 +417,11 @@ pub const CmdExecutor = struct {
                     try env.append(try std.fmt.allocPrint(self.allocator, "{s}={s}", .{ key, value }));
                 }
 
+                // Check if this is a built-in.
+                if (builtInCmds.get(args.items[0])) |built_in| {
+                    return built_in(self, .{ .args = args.items, .env = env.items });
+                }
+
                 const fork_exec_args = proc.ForkExecArgs{
                     .argv = args.items,
                     .envp = env.items,
@@ -552,3 +560,16 @@ pub const CmdExecutor = struct {
         unreachable;
     }
 };
+
+const BuiltInCmdArgs = struct {
+    args: [][]const u8,
+    env: [][]const u8,
+};
+
+const builtInCmds = ComptimeStringMap(*const fn (self: *CmdExecutor, args: BuiltInCmdArgs) anyerror!ExecBuiltCmdResult, .{
+    .@"." = dotSource,
+});
+
+fn dotSource(_: *CmdExecutor, _: BuiltInCmdArgs) !ExecBuiltCmdResult {
+    return .{ .status = 1 };
+}
