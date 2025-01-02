@@ -54,6 +54,11 @@ fn emain() !void {
 fn interactive(allocator: std.mem.Allocator, parser_executor: *ParserExecutor, options: ParserExecutor.Options) !void {
     while (true) {
         const line_ptr = c.readline("🐢> ");
+        if (line_ptr == null) {
+            _ = try std.io.getStdOut().write("\nbye!\n");
+            std.posix.exit(0);
+        }
+
         const line = mem.span(line_ptr);
 
         if (!mem.eql(u8, line, "")) {
