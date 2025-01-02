@@ -24,7 +24,7 @@ pub const ParserExecutor = struct {
         };
     }
 
-    pub fn exec(self: *ParserExecutor, line: []u8, options: Options) !u8 {
+    pub fn exec(self: *ParserExecutor, line: []const u8, options: Options) !u8 {
         var parser = cmd_parser.CmdParser.init(self.allocator, line);
 
         const exec_opts = cmd_executor.ExecOpts{

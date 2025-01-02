@@ -25,7 +25,7 @@ pub const Cmd = struct {
 };
 
 pub const CmdVar = struct {
-    name: []u8,
+    name: []const u8,
     value: *CmdWord,
 };
 
@@ -157,7 +157,7 @@ pub const CmdWord = struct {
 };
 
 pub const CmdWordPart = union(enum) {
-    literal: []u8,
+    literal: []const u8,
     str: *CmdWordPartStr,
     variable: *CmdWordPartVar,
     cmd_sub: *Cmd,
@@ -177,10 +177,10 @@ pub const CmdWordPartStr = struct {
 };
 
 pub const CmdWordPartStrPart = union(enum) {
-    literal: []u8,
+    literal: []const u8,
     variable: *CmdWordPartVar,
 };
 
 pub const CmdWordPartVar = struct {
-    name: []u8,
+    name: []const u8,
 };

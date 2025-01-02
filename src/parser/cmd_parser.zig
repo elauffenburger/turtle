@@ -20,12 +20,12 @@ pub const CmdParser = struct {
     allocator: std.mem.Allocator,
 
     buf_offset: usize,
-    buf: []u8,
+    buf: []const u8,
     in_sub: bool,
     in_pipeline: bool,
     can_set_vars: bool,
 
-    pub fn init(allocator: std.mem.Allocator, buf: []u8) Self {
+    pub fn init(allocator: std.mem.Allocator, buf: []const u8) Self {
         return .{
             .allocator = allocator,
             .buf_offset = 0,
@@ -74,7 +74,7 @@ pub const CmdParser = struct {
     ///
     /// The cursor will be placed after at the last character of the literal
     /// (e.g. "foo" will be returned and cursor will be at ' ' in "foo bar").
-    fn parseWordLiteral(self: *Self) ParseError![]u8 {
+    fn parseWordLiteral(self: *Self) ParseError![]const u8 {
         // Keep track of how many characters past the head of buf we've looked.
         //
         // We'll use this to construct the name and actually update the buf later.
@@ -504,7 +504,7 @@ pub const CmdParser = struct {
     /// Notes:
     ///   - The result will contain the current character.
     ///   - n will be clamped so that the returned slice never exceeds the length of the buffer.
-    fn take(self: *Self, n: usize) ParseError![]u8 {
+    fn take(self: *Self, n: usize) ParseError![]const u8 {
         var newOffset = self.buf_offset + n;
         if (newOffset >= self.buf.len) {
             newOffset = self.buf.len;

@@ -19,7 +19,7 @@ pub fn main() void {
 }
 
 fn emain() !void {
-    var allocator = std.heap.page_allocator;
+    const allocator = std.heap.page_allocator;
     var parser_executor = ParserExecutor.init(allocator);
 
     const args = try Args.parse(allocator);
@@ -31,10 +31,7 @@ fn emain() !void {
     if (args.filename) |filename| {
         var file_line_iter = std.mem.split(u8, try std.fs.cwd().readFileAlloc(allocator, filename, 1000000000000), "\n");
         while (file_line_iter.next()) |line| {
-            const line_copy = try allocator.alloc(u8, line.len);
-            @memcpy(line_copy, line);
-
-            const status = try parser_executor.exec(line_copy, parser_executor_options);
+            const status = try parser_executor.exec(line, parser_executor_options);
             if (status != 0) {
                 std.posix.exit(status);
             }
